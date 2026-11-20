@@ -1,0 +1,106 @@
+# Contributing
+
+Pi is a local-first mathematical reasoning project: an open-weight model
+writes a proof and Lean 4 checks it. [PI_PROJECT.md](PI_PROJECT.md) is the
+brief, and [README.md](README.md) says what exists so far. Coding agents
+should read [AGENTS.md](AGENTS.md).
+
+## Local development setup
+
+Requirements: [uv](https://docs.astral.sh/uv/), Node.js 24,
+[pre-commit](https://pre-commit.com) and the GitHub CLI (`gh`). uv installs
+the pinned Python itself.
+
+```sh
+git clone https://github.com/Pi-Mathematical-Reasoning/pi.git
+cd pi
+uv sync                                                           # Python and its dependencies
+npm ci                                                            # commitlint
+pre-commit install --hook-type commit-msg --hook-type pre-commit  # local hooks
+```
+
+The `commit-msg` hook runs commitlint locally. The `pre-commit` hooks run ruff
+and a few file checks. They are conveniences only; **CI is the authoritative
+check**.
+
+Run the CI suite locally before opening a pull request:
+
+```sh
+scripts/check.sh
+```
+
+It needs no model, GPU or cloud credentials, and neither does CI.
+
+## Python
+
+- **Interpreter.** `.python-version` pins Python 3.13. `pyproject.toml` caps
+  `requires-python` below 3.14 because MLX, the candidate inference backend,
+  publishes no wheels for it yet.
+- **Dependencies.** Add one with `uv add` (`uv add --dev` for tooling) and
+  commit `uv.lock`. CI installs with `uv sync --locked`, so a lock that is out
+  of date fails.
+- **Updates.** Dependabot updates the GitHub Actions and the commit tooling.
+  Python dependencies change by hand, because the versions an experiment ran
+  with are part of its record.
+- **Lint and format.** ruff does both. The version is pinned in
+  `pyproject.toml` and in `.pre-commit-config.yaml`; change them together.
+
+## Commits
+
+Each commit message is a **single-line** Conventional Commit:
+
+```
+type(scope)?: subject
+```
+
+- At most 100 characters, with an imperative, lowercase subject and no
+  trailing period.
+- Allowed types: `feat`, `fix`, `docs`, `chore`, `refactor`, `ci`, `build`,
+  `perf`, `style`, `test`, `revert`.
+- Breaking changes are marked with `!`, for example `feat!: rename a field`.
+- The **only** content allowed after the header is a blank line followed by
+  `Co-authored-by: Name <email>` trailers. No body text. Details belong in the
+  pull request description.
+
+commitlint enforces this (`@commitlint/config-conventional` plus the local
+`only-coauthor-trailers` rule in `tools/commitlint/`). The fixtures in
+`tests/commitlint/` show accepted and rejected messages; CI checks them.
+
+## Pull requests
+
+- After the initial scaffold commit, **every change reaches `main` through a
+  pull request**. Direct pushes are blocked.
+- Merges are **squash or rebase only**. No merge commits; history is linear.
+- The **title must be a valid Conventional Commit**, because a squash merge
+  uses it as the commit message.
+- Use the typed template for your change and fill in every section:
+
+  ```sh
+  gh pr create --template feat.md      # or fix.md, docs.md, chore.md, refactor.md, ci.md
+  ```
+
+  In the browser, append `?template=<type>.md` to the compare URL. `fix.md`
+  also asks for Bug, Root cause and Reproduction.
+
+CI runs these jobs on every pull request, and all of them are required on
+`main`:
+
+| Job | Checks |
+|---|---|
+| `commitlint` | Every commit in the range `base..head`, so rebase-merged commits are all checked |
+| `pr-title` | The title is a Conventional Commit and passes the commit header rules |
+| `commitlint-rules` | Unit tests for the local rule, and the fixture messages |
+| `python` | `uv sync --locked`, `ruff check`, `ruff format --check` and `pytest` |
+
+## Repository settings
+
+`scripts/apply-repo-settings.sh` applies the settings through the GitHub API:
+
+- Squash and rebase merges only; squash commits use the pull request title and
+  a blank body. Head branches are deleted after merge.
+- A ruleset on `main` requires a pull request, squash or rebase merges, every
+  CI job as a status check and linear history, and blocks force pushes and
+  deletion, with no bypass actors.
+
+A new CI job is not required until it is added to the list in that script and
+the script is run again.

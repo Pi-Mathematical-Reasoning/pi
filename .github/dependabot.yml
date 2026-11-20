@@ -1,0 +1,17 @@
+version: 2
+# Python dependencies are left out on purpose: the versions an experiment ran
+# with are part of its record, so they change by hand, in a pull request that
+# says why.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
