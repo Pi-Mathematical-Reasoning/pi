@@ -1,7 +1,8 @@
 [project]
 name = "pi"
 # Never published: Pi runs from a checkout, and an experiment cites the git
-# revision it ran at. This number is not the release version.
+# revision it ran at. This number is not the release version, which Release
+# Please keeps in version.txt.
 version = "0.0.0"
 description = "Local-first mathematical reasoning: proofs from an open-weight model, checked by Lean 4."
 readme = "README.md"

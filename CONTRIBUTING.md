@@ -92,6 +92,37 @@ CI runs these jobs on every pull request, and all of them are required on
 | `commitlint-rules` | Unit tests for the local rule, and the fixture messages |
 | `python` | `uv sync --locked`, `ruff check`, `ruff format --check` and `pytest` |
 
+## Releases and versioning
+
+Releases are managed by [Release Please](https://github.com/googleapis/release-please).
+A release is a `vX.Y.Z` tag, a GitHub release and a `CHANGELOG.md` entry.
+Nothing is published or deployed.
+
+- One version for the whole repository (`release-type: simple`). Release
+  Please owns `CHANGELOG.md` and `version.txt`; nobody edits them by hand.
+  The `version` in `pyproject.toml` stays at `0.0.0`, because the package is
+  never published and an experiment cites the git revision it ran at.
+- On every push to `main`, the `release-please` workflow opens or updates a
+  release pull request authored by the organization's release bot, a GitHub
+  App installed on this repository (Contents and Pull requests, read and
+  write). The repository secrets `RELEASE_BOT_CLIENT_ID` and
+  `RELEASE_BOT_PRIVATE_KEY` are its credentials. CI runs on it like any other
+  pull request.
+- **Merging the Release Please pull request is the deliberate, human-reviewed
+  act that releases a version.** Nobody creates tags by hand.
+
+The version is derived from commit types:
+
+| Commit type | Bump |
+|---|---|
+| `feat!` / `fix!`, any breaking change | major (minor while `0.x`) |
+| `feat` | minor |
+| `fix` | patch |
+| `docs`, `chore`, `ci`, `refactor`, `test`, `style`, `build` | no release on their own |
+
+No release pull request appears until a `feat` or `fix` has merged. The first
+`feat` takes the version from `0.0.0` to `0.1.0`.
+
 ## Repository settings
 
 `scripts/apply-repo-settings.sh` applies the settings through the GitHub API:
