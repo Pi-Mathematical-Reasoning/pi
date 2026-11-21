@@ -241,3 +241,19 @@ def test_every_committed_report_is_what_its_saved_files_rebuild():
     assert runs, "no committed run to check"
     for run in runs:
         assert build_report(run) == (run / "report.md").read_text(), run.name
+
+
+def test_reports_a_run_with_a_session_that_was_stopped_outright(tmp_path):
+    # A session killed outright never records its end, its memory or its swap.
+    killed = {
+        key: value
+        for key, value in RUN["sessions"][0].items()
+        if key not in ("peak_memory_bytes", "swap_growth_bytes", "runner_commands")
+    }
+    killed["ended_at"] = None
+    resumed = {**RUN, "sessions": [killed, RUN["sessions"][0]]}
+
+    report = build_report(write_run(tmp_path, run=resumed))
+
+    assert "| Sessions | 2: the run was interrupted and resumed |" in report
+    assert "| Peak memory | 10.0 GiB |" in report

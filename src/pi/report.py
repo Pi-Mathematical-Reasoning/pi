@@ -115,8 +115,10 @@ def _cost(run: dict, results: list[dict]) -> list[tuple]:
     speeds = [
         r["output_tokens_per_second"] for r in results if r["output_tokens_per_second"] is not None
     ]
-    peaks = [s["peak_memory_bytes"] for s in run["sessions"] if s["peak_memory_bytes"] is not None]
-    swaps = [s["swap_growth_bytes"] for s in run["sessions"] if s["swap_growth_bytes"] is not None]
+    # A session stopped outright never recorded its memory or swap.
+    sessions = run["sessions"]
+    peaks = [s["peak_memory_bytes"] for s in sessions if s.get("peak_memory_bytes") is not None]
+    swaps = [s["swap_growth_bytes"] for s in sessions if s.get("swap_growth_bytes") is not None]
 
     if not swaps:
         swap = "not measured"
