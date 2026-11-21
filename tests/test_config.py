@@ -25,6 +25,8 @@ top_p = 0.95
 top_k = 20
 seed = 1
 time_limit_seconds = 600
+num_batch = 1024
+use_mmap = true
 
 [probe]
 problem = "What is 2 + 2?"
@@ -51,7 +53,18 @@ def test_loads_the_model_pin_and_the_generation_settings(tmp_path):
     assert config.generation.top_k == 20
     assert config.generation.seed == 1
     assert config.generation.time_limit_seconds == 600
+    assert config.generation.num_batch == 1024
+    assert config.generation.use_mmap is True
     assert config.probe.problem == "What is 2 + 2?"
+
+
+def test_refuses_a_config_that_leaves_the_batch_size_to_ollama(tmp_path):
+    # Ollama picks a batch size and memory mapping from free memory when the
+    # request names none, and both change the numbers.
+    unpinned = VALID.replace("num_batch = 1024\n", "")
+
+    with pytest.raises(ConfigError, match=r"generation\.num_batch"):
+        load_config(write(tmp_path, unpinned))
 
 
 def test_rejects_a_config_without_the_model_digest(tmp_path):

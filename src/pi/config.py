@@ -34,6 +34,11 @@ class Generation:
     top_k: int
     seed: int
     time_limit_seconds: float
+    # Ollama picks these from free memory when a request names none, and both
+    # change the numbers, so a run names them. Defaults serve code, not files:
+    # a configuration file must state every setting.
+    num_batch: int = 1024
+    use_mmap: bool = True
 
 
 @dataclass(frozen=True)

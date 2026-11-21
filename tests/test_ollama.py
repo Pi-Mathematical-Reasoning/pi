@@ -82,7 +82,7 @@ def test_sends_only_the_problem_with_the_generation_settings(ollama):
             "/api/chat",
             {
                 "model": "qwen3:14b",
-                "stream": False,
+                "stream": True,
                 "think": True,
                 "messages": [{"role": "user", "content": "What is 2 + 2?"}],
                 "options": {
@@ -92,6 +92,8 @@ def test_sends_only_the_problem_with_the_generation_settings(ollama):
                     "top_p": 0.95,
                     "top_k": 20,
                     "seed": 1,
+                    "num_batch": 1024,
+                    "use_mmap": True,
                 },
             },
         )
@@ -100,6 +102,7 @@ def test_sends_only_the_problem_with_the_generation_settings(ollama):
 
 def test_returns_the_answer_the_reasoning_and_the_timings(ollama):
     result = OllamaClient(ollama.host).chat("qwen3:14b", "What is 2 + 2?", GENERATION)
+    progress, metrics = result.progress, result.metrics
 
     assert result == ChatResult(
         content="The sum is 12.",
@@ -112,6 +115,8 @@ def test_returns_the_answer_the_reasoning_and_the_timings(ollama):
         prompt_seconds=0.25,
         output_seconds=12.8,
         total_seconds=22.1,
+        progress=progress,
+        metrics=metrics,
     )
 
 
@@ -162,3 +167,40 @@ def test_passes_on_the_reason_the_server_gives_for_an_error(ollama):
 
     with pytest.raises(OllamaError, match="model 'qwen3:14b' not found"):
         OllamaClient(ollama.host).chat("qwen3:14b", "What is 2 + 2?", GENERATION)
+
+
+def test_keeps_every_count_and_timing_ollama_reports(ollama):
+    result = OllamaClient(ollama.host).chat("qwen3:14b", "What is 2 + 2?", GENERATION)
+
+    assert result.metrics == {
+        key: value for key, value in ollama.chat.items() if key not in ("message", "model")
+    }
+
+
+def test_records_how_far_the_reply_had_got_at_each_checkpoint(ollama):
+    # The stand-in streams "Two cases." then "The sum is 12.": six pieces.
+    result = OllamaClient(ollama.host, progress_every=2).chat(
+        "qwen3:14b", "What is 2 + 2?", GENERATION
+    )
+
+    tokens = [point[0] for point in result.progress]
+    seconds = [point[1] for point in result.progress]
+    assert tokens == [1, 2, 4, 6]  # the first token, every second one, and the last
+    assert seconds == sorted(seconds) and seconds[0] >= 0
+
+
+def test_the_time_limit_holds_while_the_reply_is_streaming(ollama):
+    ollama.replies["What is 2 + 2?"] = {"chunk_delay": 0.15}
+    hurried = Generation(**{**vars(GENERATION), "time_limit_seconds": 0.3})
+
+    with pytest.raises(OllamaTimeout, match="0.3"):
+        OllamaClient(ollama.host).chat("qwen3:14b", "What is 2 + 2?", hurried)
+
+
+def test_a_streamed_reply_joins_back_to_the_text_the_model_wrote(ollama):
+    ollama.chat["message"]["content"] = "Line one.\n\n  $\\boxed{12}$ done."
+
+    result = OllamaClient(ollama.host).chat("qwen3:14b", "What is 2 + 2?", GENERATION)
+
+    assert result.content == "Line one.\n\n  $\\boxed{12}$ done."
+    assert result.thinking == "Two cases."

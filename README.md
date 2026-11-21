@@ -94,6 +94,9 @@ answer read from it, the verdict, the token counts, the time, and whether the
 machine was on battery or mains. `pi report` rebuilds the score from those
 two files alone, so it needs no model.
 
+Every field is described in [docs/records.md](docs/records.md), for analysis
+in a notebook.
+
 | Benchmark | Problems | Use |
 | --- | --- | --- |
 | `benchmarks/math-dev.toml` | A frozen sample of 30 MATH training problems | Tuning the limits and debugging the grader |
@@ -133,9 +136,11 @@ Every run, scored or not, also keeps:
 - **Its sessions.** Each one is recorded when it starts, with the command, the
   commit, the machine, macOS and Python, so a run killed outright still says
   what produced its results. Each result names its session and start time.
-- **The model runner's launch settings.** These include the cache type and
-  flash attention, which change the numbers. If they change part way through,
-  the run stops before keeping the attempt.
+- **The model runner's launch settings.** These include the cache type, flash
+  attention and batch size, which change the numbers. The batch size and
+  memory-mapping are pinned in the configuration, because Ollama otherwise
+  picks them from free memory. If the launch changes part way through, the run
+  stops before keeping the attempt.
 - **Awake attempts only.** An attempt the Mac slept through is thrown away and
   made again, because its time measured the sleep. A fresh load makes the new
   attempt write the same reply.

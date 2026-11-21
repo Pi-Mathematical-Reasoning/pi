@@ -102,6 +102,9 @@ def test_a_result_keeps_the_reply_the_token_counts_and_the_time(ollama, tmp_path
 
     first, second, _ = read_results(tmp_path / "run")
     assert first.pop("started_at").endswith("+00:00")
+    # Measured live, and tested in tests/test_diagnostics.py.
+    for live in ("ended_at", "unload_seconds", "progress", "thermal", "metrics"):
+        first.pop(live)
     assert first == {
         "session": 0,
         "id": "dev/1",
@@ -119,8 +122,14 @@ def test_a_result_keeps_the_reply_the_token_counts_and_the_time(ollama, tmp_path
         "output_tokens": 256,
         "output_tokens_per_second": 20.0,
         "load_seconds": 9.0,
+        "prompt_seconds": 0.25,
+        "output_seconds": 12.8,
+        "total_seconds": 22.1,
         "elapsed_seconds": 10.0,
+        "peak_memory_bytes": None,
+        "swap_used_bytes": None,
         "power": None,
+        "discarded_attempts": [],
     }
     assert second["elapsed_seconds"] == 15.0
 

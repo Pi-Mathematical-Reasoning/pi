@@ -256,7 +256,7 @@ Qwen3-14B checkpoint answer correctly, with one attempt each, on this Mac?
 | Problems | All 500 of MATH-500 (`benchmarks/math-500.toml`), file SHA-256 `35dc41080a36`. Not a subset |
 | Score | Problems whose verdict is `correct`, divided by 500 |
 | Checkpoint | `qwen3:14b` on Ollama 0.40.13, digest `bdbd181c33f2`, weights `sha256-a8cc1361f314` |
-| Settings | `configs/qwen3-14b.toml`: reasoning on, temperature 0.6, top-p 0.95, top-k 20, seed 1, 24,576-token context, 16,384-token output limit, 1,200 s time limit |
+| Settings | `configs/qwen3-14b.toml`: reasoning on, temperature 0.6, top-p 0.95, top-k 20, seed 1, 24,576-token context, 16,384-token output limit, 1,200 s time limit, batch size 1,024, weights memory-mapped |
 | Prompt | The problem text alone, as the only user message |
 | Grader | Rules version 1 ([docs/grading.md](../docs/grading.md)), math-verify 0.9.0 |
 | Unsolved | `incorrect`, `missing`, `cut_off` and `timed_out` all count as unsolved |
@@ -309,6 +309,22 @@ development problems, never MATH-500, from a fresh clone of `pi`:
   killed session crashed it. It was fixed in pi#19 before this entry.
 - The run is published to `jaws-pi-prover-artifacts` as
   `data/runs/2026-11-21-preflight/`, the first use of `pi publish`.
+
+**Amended on 2026-11-21, before the run started.** Two changes, both found
+while preparing it:
+
+- **Two launch settings are pinned:** batch size 1,024 and memory-mapped
+  weights. Ollama otherwise picks both from free memory at each load. A check
+  run on four development problems caught it halving the batch and turning
+  memory-mapping off part way through (`reason=metal_partial` in its log), and
+  the batch size changes the arithmetic. The pinned values are the ones every
+  earlier run was launched with.
+- **Replies are streamed,** so that each result can record the time to first
+  token and how far the reply had got every 256 tokens, along with Ollama's
+  full timing breakdown, per-problem memory, swap and thermal state, and any
+  attempt thrown away ([docs/records.md](../docs/records.md)). Streamed
+  replies matched the recorded unstreamed ones character for character on the
+  same development problems.
 
 **Expected cost.** About 17 to 20 hours of the Mac on mains, from the
 development run's mean of 3,660 output tokens at 27 tokens per second, plus
