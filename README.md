@@ -103,10 +103,24 @@ The problem file is fetched on first use into `data/` and checked against the
 checksum pinned in the benchmark definition. Problem files are never
 committed.
 
+Each definition also names a mirror: the same file in Pi's own S3 bucket,
+kept by [pi-benchmarks](https://github.com/Pi-Mathematical-Reasoning/pi-benchmarks)
+in case an upstream disappears. `pi eval` tries the mirror first, with the AWS
+CLI and whatever credentials the shell has, and falls back to the upstream
+with a warning. The checksum is checked either way, so both give the same
+results, and each session of a run records where its file came from. To use
+the mirror, sign in first:
+
+```sh
+aws sso login --profile jaws-prod
+export AWS_PROFILE=jaws-prod
+```
+
 A problem takes two to three minutes on average and up to ten, so the 30
-development problems take about an hour and a half. On a Mac, run on mains power: this checkpoint
-generates a third slower on battery. Start a long run with `caffeinate -i` in
-front of the command so the machine does not sleep part way.
+development problems take about an hour and a half. On a Mac, run on mains
+power: this checkpoint generates a third slower on battery. Start a long run
+with `caffeinate -i` in front of the command so the machine does not sleep
+part way.
 
 ## Layout
 

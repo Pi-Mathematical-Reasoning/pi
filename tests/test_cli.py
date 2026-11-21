@@ -6,6 +6,7 @@ import json
 import socket
 import subprocess
 import sys
+from pathlib import Path
 
 from pi.cli import main
 from tests.ollama_stub import DIGEST
@@ -358,3 +359,27 @@ def test_eval_shows_each_result_as_it_finishes_when_its_output_is_piped(
         written = next(i for i, (kind, text) in enumerate(events) if marker in text)
         next_line = next(i for i, (kind, text) in enumerate(events) if following in text)
         assert ("flush", "") in events[written:next_line]
+
+
+def test_eval_records_where_the_problem_file_came_from(ollama, tmp_path):
+    answer_one_of_three(ollama)
+
+    main(eval_arguments(tmp_path, ollama))
+
+    session = json.loads((tmp_path / "run" / "run.json").read_text())["sessions"][0]
+    assert session["problem_file"] == (tmp_path / "problems.jsonl").as_uri()
+
+
+def test_eval_warns_when_the_mirror_fails_and_the_upstream_serves(ollama, tmp_path, capsys, aws):
+    answer_one_of_three(ollama)
+    arguments = eval_arguments(tmp_path, ollama)
+    definition = Path(arguments[arguments.index("--benchmark") + 1])
+    mirror = "s3://jaws-pi-benchmarks-problems/data/sample/abc/problems.jsonl"
+    definition.write_text(definition.read_text() + f'mirror = "{mirror}"\n')
+
+    status = main(arguments)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "warning:" in captured.err and "NoSuchKey" in captured.err
+    assert f"problem file from {(tmp_path / 'problems.jsonl').as_uri()}" in captured.out

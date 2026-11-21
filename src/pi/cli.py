@@ -6,7 +6,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pi.benchmarks import BenchmarkError, load_benchmark, load_problems
+from pi.benchmarks import BenchmarkError, fetch_file, load_benchmark, load_problems
 from pi.checkpoint import CheckpointError
 from pi.config import ConfigError, load_config
 from pi.evaluation import RUN, EvaluationError, run_evaluation
@@ -72,6 +72,10 @@ def _eval(options: argparse.Namespace, arguments: list[str]) -> int:
     try:
         config = load_config(options.config)
         benchmark = load_benchmark(options.benchmark)
+        fetched = fetch_file(benchmark, options.data_dir)
+        for warning in fetched.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        print(f"problem file from {fetched.source}", flush=True)
         problems = load_problems(benchmark, options.data_dir)
         run_evaluation(
             config,
@@ -83,6 +87,7 @@ def _eval(options: argparse.Namespace, arguments: list[str]) -> int:
             options.out,
             command=["pi", *arguments],
             code=code_revision(Path(__file__).parent),
+            problem_file=fetched.source,
         )
     except KeyboardInterrupt:
         print(f"\ninterrupted; {resume}", file=sys.stderr)

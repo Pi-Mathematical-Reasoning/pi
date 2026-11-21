@@ -44,6 +44,7 @@ def run_evaluation(
     clock=time.monotonic,
     report=None,
     read_power=read_power,
+    problem_file: str | None = None,
 ) -> dict:
     """Attempt every problem that has no result yet, and return the run's description."""
     report = report or _announce
@@ -86,6 +87,9 @@ def run_evaluation(
         "started_at": _now(),
         "command": command,
         "code": code,
+        # Where this session's copy of the problem file came from: the mirror or
+        # the upstream. Not part of the run's identity: the bytes are the same.
+        "problem_file": problem_file,
         "attempted": 0,
     }
     try:
