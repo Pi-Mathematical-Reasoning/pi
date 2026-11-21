@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from pi.checkpoint import CheckpointError
 from pi.config import Config, Generation, ModelPin, Probe, Runtime
 from pi.ollama import OllamaClient
-from pi.probe import ProbeError, run_probe
+from pi.probe import run_probe
 from pi.resources import OllamaTree, ResourceSampler
 from tests.ollama_stub import DIGEST
 
@@ -53,7 +54,7 @@ def test_refuses_to_run_a_checkpoint_other_than_the_pinned_one(ollama):
     other = "0" * 64
     config = config_for(ollama, model=ModelPin(name="qwen3:14b", digest=other))
 
-    with pytest.raises(ProbeError, match=f"{DIGEST}.*{other}"):
+    with pytest.raises(CheckpointError, match=f"{DIGEST}.*{other}"):
         probe(ollama, config)
 
     assert ollama.requests_to("/api/chat") == []
@@ -76,7 +77,7 @@ def test_starts_from_a_freshly_loaded_model(ollama):
 def test_says_how_to_install_a_model_that_is_missing(ollama):
     config = config_for(ollama, model=ModelPin(name="qwen3:32b", digest=DIGEST))
 
-    with pytest.raises(ProbeError, match="ollama pull qwen3:32b"):
+    with pytest.raises(CheckpointError, match="ollama pull qwen3:32b"):
         probe(ollama, config)
 
 

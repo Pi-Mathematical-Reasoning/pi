@@ -26,6 +26,11 @@ class OllamaTree:
     runner_commands: tuple[str, ...]
 
 
+def without_home(command: str) -> str:
+    """A command line with the home directory written as ~, fit for a public record."""
+    return command.replace(str(Path.home()), "~")
+
+
 def parse_process_table(text: str) -> list[Process]:
     """Parse `ps -eo pid=,ppid=,rss=,args=`, where rss is in KiB."""
     processes = []

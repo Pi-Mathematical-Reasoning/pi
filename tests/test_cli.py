@@ -1,5 +1,7 @@
 """The `pi` command, run in-process against a local stand-in for Ollama."""
 
+import hashlib
+import io
 import json
 import socket
 import subprocess
@@ -180,3 +182,179 @@ def test_grade_explains_a_record_it_cannot_read(tmp_path, capsys):
 
     assert status == 1
     assert "absent.json" in capsys.readouterr().err
+
+
+PROBLEM_ROWS = [
+    {
+        "unique_id": "dev/1",
+        "problem": "What is $1+1$?",
+        "answer": "2",
+        "subject": "Algebra",
+        "level": 1,
+    },
+    {
+        "unique_id": "dev/2",
+        "problem": "How many sides has a triangle?",
+        "answer": "3",
+        "subject": "Geometry",
+        "level": 2,
+    },
+    {
+        "unique_id": "dev/3",
+        "problem": "Solve $2x=1$.",
+        "answer": "\\frac{1}{2}",
+        "subject": "Algebra",
+        "level": 3,
+    },
+]
+
+
+def write_benchmark(tmp_path):
+    """A benchmark definition pinned to a problem file on disk."""
+    source = tmp_path / "problems.jsonl"
+    source.write_text("".join(json.dumps(row) + "\n" for row in PROBLEM_ROWS))
+    definition = tmp_path / "sample.toml"
+    definition.write_text(
+        'name = "sample"\n'
+        f'url = "{source.as_uri()}"\n'
+        f'sha256 = "{hashlib.sha256(source.read_bytes()).hexdigest()}"\n'
+        'format = "jsonl"\n'
+    )
+    return str(definition)
+
+
+def eval_arguments(tmp_path, ollama):
+    return [
+        "eval",
+        "--config",
+        write_config(tmp_path, ollama.host),
+        "--benchmark",
+        write_benchmark(tmp_path),
+        "--out",
+        str(tmp_path / "run"),
+        "--data-dir",
+        str(tmp_path / "data"),
+    ]
+
+
+def answer_one_of_three(ollama):
+    ollama.replies = {
+        "What is $1+1$?": {"content": r"It is $\boxed{2}$."},
+        "How many sides has a triangle?": {"content": r"It has $\boxed{4}$."},
+        "Solve $2x=1$.": {"content": "I cannot tell."},
+    }
+
+
+def test_eval_runs_every_problem_and_prints_the_score(ollama, tmp_path, capsys):
+    answer_one_of_three(ollama)
+
+    status = main(eval_arguments(tmp_path, ollama))
+
+    printed = capsys.readouterr().out
+    assert status == 0
+    assert "[1/3] dev/1  correct" in printed
+    assert "[3/3] dev/3  missing" in printed
+    assert "sample: 1 of 3 correct (33.3%)" in printed
+    assert len((tmp_path / "run" / "results.jsonl").read_text().splitlines()) == 3
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["complete"] is True
+
+
+def test_eval_that_fails_part_way_says_how_to_resume(ollama, tmp_path, capsys):
+    answer_one_of_three(ollama)
+    ollama.replies["How many sides has a triangle?"] = {"error": (500, "the runner crashed")}
+
+    status = main(eval_arguments(tmp_path, ollama))
+
+    errors = capsys.readouterr().err
+    assert status == 1
+    assert "the runner crashed" in errors
+    assert "run the same command again to resume" in errors
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["complete"] is False
+
+
+def test_eval_stopped_from_the_keyboard_says_how_to_resume(ollama, tmp_path, capsys, monkeypatch):
+    def interrupted(*arguments, **options):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("pi.cli.run_evaluation", interrupted)
+
+    status = main(eval_arguments(tmp_path, ollama))
+
+    assert status == 130
+    assert "run the same command again to resume" in capsys.readouterr().err
+
+
+def test_eval_explains_a_missing_benchmark_definition(ollama, tmp_path, capsys):
+    arguments = eval_arguments(tmp_path, ollama)
+    arguments[arguments.index("--benchmark") + 1] = str(tmp_path / "absent.toml")
+
+    status = main(arguments)
+
+    assert status == 1
+    assert "absent.toml" in capsys.readouterr().err
+
+
+def test_report_prints_the_report_of_a_saved_run(ollama, tmp_path, capsys):
+    answer_one_of_three(ollama)
+    main(eval_arguments(tmp_path, ollama))
+    capsys.readouterr()
+
+    status = main(["report", str(tmp_path / "run")])
+
+    printed = capsys.readouterr().out
+    assert status == 0
+    assert printed.startswith("# sample: 1 of 3 correct (33.3%)\n")
+    assert "| dev/2 | incorrect | `4` |" in printed
+
+
+def test_report_does_not_contact_the_model(ollama, tmp_path):
+    answer_one_of_three(ollama)
+    main(eval_arguments(tmp_path, ollama))
+    before = len(ollama.requests)
+
+    main(["report", str(tmp_path / "run")])
+
+    assert len(ollama.requests) == before
+
+
+def test_report_writes_to_a_file_when_asked(ollama, tmp_path, capsys):
+    answer_one_of_three(ollama)
+    main(eval_arguments(tmp_path, ollama))
+    capsys.readouterr()
+
+    main(["report", str(tmp_path / "run"), "--out", str(tmp_path / "report.md")])
+
+    assert (tmp_path / "report.md").read_text().startswith("# sample: 1 of 3 correct (33.3%)\n")
+    assert str(tmp_path / "report.md") in capsys.readouterr().out
+
+
+def test_report_explains_a_directory_that_holds_no_run(tmp_path, capsys):
+    status = main(["report", str(tmp_path / "nothing-here")])
+
+    assert status == 1
+    assert "nothing-here" in capsys.readouterr().err
+
+
+def test_eval_shows_each_result_as_it_finishes_when_its_output_is_piped(
+    ollama, tmp_path, monkeypatch
+):
+    # A pipe is block-buffered, so an unflushed line stays hidden until the run ends.
+    answer_one_of_three(ollama)
+    events = []
+
+    class Pipe(io.StringIO):
+        def write(self, text):
+            events.append(("write", text))
+            return super().write(text)
+
+        def flush(self):
+            events.append(("flush", ""))
+
+    monkeypatch.setattr(sys, "stdout", Pipe())
+
+    main(eval_arguments(tmp_path, ollama))
+
+    for marker, following in (("[1/3]", "[2/3]"), ("[2/3]", "[3/3]")):
+        written = next(i for i, (kind, text) in enumerate(events) if marker in text)
+        next_line = next(i for i, (kind, text) in enumerate(events) if following in text)
+        assert ("flush", "") in events[written:next_line]

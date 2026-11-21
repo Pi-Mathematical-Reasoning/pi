@@ -70,7 +70,18 @@ consistent about them:
 
 Only `correct` counts as solved. A reference answer that cannot be parsed is
 an error in the benchmark data: grading stops with an error and produces no
-verdict.
+verdict. A benchmark run checks every reference before its first attempt.
+
+## Attempts that hit a limit
+
+A benchmark run gives each problem one attempt, within a time limit and an
+output-token limit. An attempt that hits either is unsolved, whatever it had
+written, and is not graded.
+
+| Verdict | Meaning |
+| --- | --- |
+| `timed_out` | The model was still generating at the time limit |
+| `cut_off` | The reply stopped before the model finished it, in practice at the output limit |
 
 ## The grader
 

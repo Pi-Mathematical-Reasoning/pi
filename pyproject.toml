@@ -12,6 +12,7 @@ license = "MIT"
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "math-verify==0.9.0",
+    "pyarrow==26.0.1",
 ]
 
 [project.scripts]
@@ -36,3 +37,7 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Holds a whole report verbatim, and a report's table rows are long.
+"tests/test_report.py" = ["E501"]
