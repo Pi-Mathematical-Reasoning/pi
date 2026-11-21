@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Pi-Mathematical-Reasoning/pi/compare/v0.2.0...v0.3.0) (2026-11-21)
+
+
+### Features
+
+* add the benchmark runner and the development problems ([#9](https://github.com/Pi-Mathematical-Reasoning/pi/issues/9)) ([7c5f762](https://github.com/Pi-Mathematical-Reasoning/pi/commit/7c5f762938938c6f8a83ecb863fc78b6ff378c45))
+
 ## [0.2.0](https://github.com/Pi-Mathematical-Reasoning/pi/compare/v0.1.0...v0.2.0) (2026-11-21)
 
 
