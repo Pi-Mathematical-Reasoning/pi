@@ -28,6 +28,12 @@ seed = 1
 context_length = 24576
 max_output_tokens = 16384
 time_limit_seconds = 1200
+# Pinned, because Ollama otherwise picks both from free memory at each load:
+# under memory pressure it halves the batch and stops memory-mapping the
+# weights (its log says `reason=metal_partial`), and the batch size changes the
+# arithmetic. These are the values every run so far was launched with.
+num_batch = 1024
+use_mmap = true
 
 [probe]
 # An original problem in the style of the harder MATH problems. It is not

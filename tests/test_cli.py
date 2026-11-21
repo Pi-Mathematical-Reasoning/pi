@@ -28,6 +28,8 @@ top_p = 0.95
 top_k = 20
 seed = 1
 time_limit_seconds = {time_limit}
+num_batch = 1024
+use_mmap = true
 
 [probe]
 problem = "What is 2 + 2?"

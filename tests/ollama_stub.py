@@ -207,7 +207,33 @@ class OllamaStub:
                         reply["message"]["content"] = special["content"]
                     if "done_reason" in special:
                         reply["done_reason"] = special["done_reason"]
-                    self._answer(200, reply)
+                    if body.get("stream"):
+                        self._stream(reply, special.get("chunk_delay", 0))
+                    else:
+                        self._answer(200, reply)
+
+            def _stream(self, reply, chunk_delay):
+                """As Ollama streams: one line per token, reasoning first, then the
+                answer, then a last line with no text and the counts and timings."""
+                message = reply["message"]
+                pieces = [("thinking", t) for t in _tokens(message.get("thinking", ""))]
+                pieces += [("content", t) for t in _tokens(message.get("content", ""))]
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/x-ndjson")
+                    self.end_headers()
+                    for field, text in pieces:
+                        chunk = {"role": "assistant", "content": ""}
+                        chunk[field] = text
+                        line = {"model": reply["model"], "message": chunk, "done": False}
+                        self.wfile.write((json.dumps(line) + "\n").encode())
+                        self.wfile.flush()
+                        stub._stopping.wait(chunk_delay)
+                    last = {k: v for k, v in reply.items() if k != "message"}
+                    last["message"] = {"role": "assistant", "content": ""}
+                    self.wfile.write((json.dumps(last) + "\n").encode())
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
             def _answer(self, status, payload):
                 data = json.dumps(payload).encode()
@@ -221,3 +247,10 @@ class OllamaStub:
                     pass  # the client gave up waiting, as the timeout tests intend
 
         return Handler
+
+
+def _tokens(text):
+    """Text cut into token-sized pieces that join back to it exactly."""
+    import re
+
+    return re.findall(r"\s*\S+|\s+", text)

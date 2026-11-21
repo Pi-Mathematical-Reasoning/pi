@@ -63,6 +63,7 @@ def evaluate(ollama, out, **options):
         "read_wake": lambda: None,
         "read_machine": lambda: MACHINE,
         "verify_weights": lambda name: True,
+        "read_thermal": lambda: None,
     }
     settings.update(options)
     return run_evaluation(client=OllamaClient(ollama.host), out=out, **settings)
@@ -200,7 +201,9 @@ def test_records_the_runners_launch_settings_without_its_port(ollama, tmp_path):
 
 def test_a_change_in_the_runners_settings_stops_the_run_before_its_result_is_kept(ollama, tmp_path):
     changed = runner_tree(RUNNER.replace("q8_0", "f16"))
-    sampler = quiet_sampler([runner_tree(), runner_tree(), changed])
+    # Three readings during the first problem (entering, after it, the check), then
+    # the second problem's runner, launched differently.
+    sampler = quiet_sampler([runner_tree(), runner_tree(), runner_tree(), changed])
 
     with pytest.raises(EvaluationError, match="runner"):
         evaluate(ollama, tmp_path / "run", sampler=sampler)

@@ -107,6 +107,22 @@ def read_power() -> dict | None:
     return parse_power(status.stdout, settings.stdout)
 
 
+def parse_thermal(text: str) -> list[str]:
+    """Parse `pmset -g therm`: its notes and readings, one line each, as printed.
+
+    Kept as printed because the format differs between macOS versions and states.
+    """
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def read_thermal() -> list[str] | None:
+    """The machine's thermal and performance warnings, or None off macOS."""
+    if sys.platform != "darwin":
+        return None
+    done = subprocess.run(["pmset", "-g", "therm"], capture_output=True, text=True, check=True)
+    return parse_thermal(done.stdout)
+
+
 def read_wake() -> str | None:
     """When the machine last woke from sleep, or None where this is not read (off macOS).
 
@@ -177,6 +193,9 @@ class ResourceSampler:
         self._thread = None
         self._failure = None
         self.peak_resident_bytes = None
+        # Since the last begin_attempt(): one problem's own peak, and the swap after it.
+        self.attempt_peak_resident_bytes = None
+        self.last_swap_bytes = None
         self.runner_commands = ()
         self.swap_before_bytes = None
         self.swap_peak_bytes = None
@@ -191,6 +210,9 @@ class ResourceSampler:
         tree = self._read_tree()
         if tree is not None:
             self.peak_resident_bytes = max(self.peak_resident_bytes or 0, tree.resident_bytes)
+            self.attempt_peak_resident_bytes = max(
+                self.attempt_peak_resident_bytes or 0, tree.resident_bytes
+            )
             if tree.runner_commands:
                 self.runner_commands = tree.runner_commands
 
@@ -199,6 +221,11 @@ class ResourceSampler:
             if self.swap_before_bytes is None:
                 self.swap_before_bytes = swap
             self.swap_peak_bytes = max(self.swap_peak_bytes or 0, swap)
+            self.last_swap_bytes = swap
+
+    def begin_attempt(self) -> None:
+        """Start measuring one problem's own peak memory."""
+        self.attempt_peak_resident_bytes = None
 
     def __enter__(self):
         self.sample()

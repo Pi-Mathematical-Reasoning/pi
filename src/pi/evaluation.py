@@ -23,6 +23,7 @@ from pi.resources import (
     ResourceSampler,
     read_machine,
     read_power,
+    read_thermal,
     read_wake,
     without_home,
 )
@@ -58,6 +59,7 @@ def run_evaluation(
     read_wake=read_wake,
     read_machine=read_machine,
     verify_weights=verify_weights,
+    read_thermal=read_thermal,
 ) -> dict:
     """Attempt every problem that has no result yet, and return the run's description.
 
@@ -138,7 +140,16 @@ def run_evaluation(
         with sampler, (out / RESULTS).open("a") as results_file:
             for problem in remaining:
                 result = _attempt_awake(
-                    config, client, problem, clock, read_power, read_wake, benchmark, report
+                    config,
+                    client,
+                    problem,
+                    clock,
+                    read_power,
+                    read_wake,
+                    benchmark,
+                    report,
+                    sampler,
+                    read_thermal,
                 )
                 _check_runner(run, sampler, out)
                 result = {"session": index, **result}
@@ -160,13 +171,16 @@ def run_evaluation(
     return run
 
 
-def _attempt_awake(config, client, problem, clock, read_power, read_wake, benchmark, report):
+def _attempt_awake(
+    config, client, problem, clock, read_power, read_wake, benchmark, report, sampler, read_thermal
+):
     """One attempt the machine stayed awake through.
 
     An attempt the machine slept through is thrown away and made again: its time
     measured the sleep, and a time limit it hit would be the laptop's, not the
     model's. A fresh load makes the new attempt write the same reply.
     """
+    discarded = []
     for _ in range(_SLEEP_RETRIES + 1):
         if benchmark.scored:
             power = read_power()
@@ -177,9 +191,16 @@ def _attempt_awake(config, client, problem, clock, read_power, read_wake, benchm
                     "command again to resume"
                 )
         before = read_wake()
-        result = _attempt(config, client, problem, clock, read_power)
+        result = _attempt(config, client, problem, clock, read_power, sampler, read_thermal)
         if read_wake() == before:
-            return result
+            return {**result, "discarded_attempts": discarded}
+        discarded.append(
+            {
+                "started_at": result["started_at"],
+                "ended_at": result["ended_at"],
+                "reason": "the machine slept",
+            }
+        )
         report(f"the machine slept during {problem.id}; attempting it again")
     raise EvaluationError(
         f"the machine slept during {_SLEEP_RETRIES + 1} attempts at {problem.id}; keep it "
@@ -229,14 +250,26 @@ def read_results(out: Path) -> list[dict]:
     return results
 
 
-def _attempt(config: Config, client: OllamaClient, problem: Problem, clock, read_power) -> dict:
+def _attempt(
+    config: Config,
+    client: OllamaClient,
+    problem: Problem,
+    clock,
+    read_power,
+    sampler: ResourceSampler | None = None,
+    read_thermal=lambda: None,
+) -> dict:
     name = config.model.name
     # Battery or mains: the machine generates markedly slower on battery.
     power = read_power()
     # A fresh load for every problem: the same seed gives different text when
     # the model still holds an earlier prompt in its cache.
+    unload_started = time.monotonic()
     client.unload(name)
+    unload_seconds = time.monotonic() - unload_started
 
+    if sampler is not None:
+        sampler.begin_attempt()
     started_at = _now()
     started = clock()
     try:
@@ -244,6 +277,10 @@ def _attempt(config: Config, client: OllamaClient, problem: Problem, clock, read
     except OllamaTimeout:
         reply = None
     elapsed = clock() - started
+    ended_at = _now()
+    if sampler is not None:
+        sampler.sample()  # the model is still loaded: this attempt's own figures
+    thermal = read_thermal()
 
     # An attempt that hits a limit is unsolved, whatever it had written.
     if reply is None:
@@ -276,8 +313,21 @@ def _attempt(config: Config, client: OllamaClient, problem: Problem, clock, read
         "output_tokens": None if reply is None else reply.output_tokens,
         "output_tokens_per_second": speed,
         "load_seconds": None if reply is None else reply.load_seconds,
+        "prompt_seconds": None if reply is None else reply.prompt_seconds,
+        "output_seconds": None if reply is None else reply.output_seconds,
+        "total_seconds": None if reply is None else reply.total_seconds,
         "elapsed_seconds": elapsed,
+        "ended_at": ended_at,
+        "unload_seconds": unload_seconds,
+        # (tokens so far, seconds since the request): time to first token, then
+        # every 256 tokens, then the last.
+        "progress": None if reply is None else reply.progress,
+        "peak_memory_bytes": None if sampler is None else sampler.attempt_peak_resident_bytes,
+        "swap_used_bytes": None if sampler is None else sampler.last_swap_bytes,
+        "thermal": thermal,
         "power": power,
+        # Everything Ollama reported about the attempt, as it reported it.
+        "metrics": None if reply is None else reply.metrics,
     }
 
 
