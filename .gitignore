@@ -7,6 +7,9 @@ __pycache__/
 dist/
 *.egg-info/
 
+# Records of local runs that have not been chosen for the experiment log
+runs/
+
 # Node (commit-message tooling)
 node_modules/
 
