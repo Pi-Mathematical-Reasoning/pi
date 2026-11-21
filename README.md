@@ -18,16 +18,18 @@ The full brief, with each milestone and its done condition, is
 
 ## Status
 
-**Two things run so far: the checkpoint probe and the answer grader.** The
-probe loads the pinned checkpoint, gives it one problem and records how fast
-it went and what it cost the machine. The grader finds the final answer in a
-reply and decides whether it matches a reference. No benchmark has been run
-yet. The first deliverable is a reproducible score for the original
+**Three things run so far: the checkpoint probe, the answer grader and the
+benchmark run.** The probe loads the pinned checkpoint, gives it one problem
+and records how fast it went and what it cost the machine. The grader finds
+the final answer in a reply and decides whether it matches a reference. The
+benchmark run attempts every problem of a pinned benchmark once and reports
+the score. It has been run on the 30 development problems and not yet on
+MATH-500. The first deliverable is a reproducible score for the original
 checkpoint; training comes after that measurement.
 
 | Stage | What it measures | State |
 | --- | --- | --- |
-| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | In progress: the checkpoint is pinned and probed and the grader is written; the benchmark run is next |
+| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | In progress: the development run is done (28 of 30); the limits are still to be fixed, and then the scored MATH-500 run |
 | Milestone 2: proof writing | Fraction of a pinned miniF2F subset proved, graded by Lean 4 | Not started |
 | Later experiments | Lean-guided revision, fine-tuning on AWS, a larger-model comparison | Not started |
 

@@ -55,8 +55,11 @@ second probe returned the same reply as the recorded one, token for token, at
 
 - **Memory is not a constraint.** The peak was 10.1 GiB of 48 GB, with no
   swap, at a 16,384-token context.
-- **Time is the constraint.** If every MATH-500 problem took as long as this
-  one, 500 problems would take about 18 hours. If every problem ran to the
+- **Time is the constraint.** *Note added after the development run:* this
+  probe and the sample below ran on battery, in Low Power Mode. On mains the
+  same checkpoint generates about 27 tokens per second, and the development
+  run entry has the current estimate of laptop hours. If every MATH-500
+  problem took as long as this one, 500 problems would take about 18 hours. If every problem ran to the
   8,192-token output limit, they would take about 60 hours. One problem cannot
   say where the average lies; the development run has to measure that before
   the limits are fixed.
@@ -112,3 +115,74 @@ where the grader's tests use them.
 - **Time per problem agrees with the probe.** The mean was 2,131 tokens and
   116 s, from 77 s to 181 s. These problems are easier than the hardest in
   MATH, so this is not an estimate for MATH-500.
+
+## 2026-11-20: development run, 28 of 30 correct
+
+**Question.** What does a problem really cost, and do the provisional limits
+and the grading rules hold up on real MATH problems?
+
+**Answer.** The checkpoint solved 28 of the 30 development problems. Both
+misses ran out of output tokens; no reply was wrong or unreadable. A MATH-500
+run would take roughly 16 to 19 hours on mains power. The run also showed
+that this Mac generates a third slower on battery, which changes time but not
+verdicts.
+
+**This is not a MATH-500 score.** The development problems come from MATH's
+training split, which the checkpoint may have seen in pretraining.
+
+**Setup.** `benchmarks/math-dev.toml`: 30 MATH training problems, frozen in
+advance in the proportions of MATH-500's levels. The checkpoint, runtime and
+settings are those of `configs/qwen3-14b.toml`, graded under rules version 1.
+One attempt per problem, each from a fresh load. The run was one
+uninterrupted session of 87 minutes from a clean checkout of `ba7f663`:
+
+```sh
+uv run pi eval --config configs/qwen3-14b.toml --benchmark benchmarks/math-dev.toml --out experiments/2026-11-20-math-dev
+```
+
+**Result.**
+
+| Measurement | Value |
+| --- | --- |
+| Correct | 28 of 30 (93.3%) |
+| Unsolved | 2, both `cut_off` at the 8,192-token output limit |
+| `incorrect`, `missing`, `timed_out` | 0 |
+| Output tokens per problem | mean 3,660, median 2,602 |
+| Time per problem | mean 173.8 s, median 147.9 s, longest 457.9 s |
+| Peak memory | 10.8 GiB |
+| Swap growth | None |
+
+Kept from the run, in [2026-11-20-math-dev](2026-11-20-math-dev/):
+[report.md](2026-11-20-math-dev/report.md), which `pi report` rebuilds from
+the other two files; `run.json`; and `results.jsonl`, with every reply. The
+records hold problem ids and the model's replies, not the dataset's problem
+texts or solutions.
+
+**What it means for the baseline.**
+
+- **The output limit is what costs problems.** Two attempts hit 8,192 tokens,
+  and three more finished within 15% of it (7,951, 7,425 and 7,182 tokens,
+  all correct). One of the two cut-off attempts had finished reasoning and
+  was writing out an answer equal to the reference. The other was still
+  working. A higher limit would probably recover some of these, at a cost in
+  time. The limit has to be fixed before the scored run.
+- **The time limit never bound.** The slowest attempt took 458 s against a
+  limit of 600 s. An attempt that runs to 8,192 tokens takes about 450 s on
+  battery, so the token limit is always reached first while the speed stays
+  above 14 tokens per second. Raising the output limit means raising the time
+  limit with it.
+- **The strict extraction rule cost nothing.** All 28 finished replies ended
+  in a boxed answer. None was `missing`.
+- **The power source changes the speed.** The charger was connected part way
+  through. Problems 1 to 20 ran on battery, where macOS was set to Low Power
+  Mode, at 18.4 tokens per second. Problems 22 to 30 ran on mains, in High
+  Power Mode, at 27.0. Under the current limits this affects time only, but
+  the records do not say which problems ran on which: a run should record its
+  power source, and a scored run should stay on mains throughout.
+- **Laptop hours for MATH-500.** At this run's mean of 3,660 tokens, 500
+  problems take about 19 hours on mains and about 28 on battery. That is
+  probably high: Intermediate Algebra used far more tokens than any other
+  subject (mean 6,572) and is 30% of this sample but 19% of MATH-500.
+  Weighting by MATH-500's subjects gives about 16 hours on mains. The subject
+  samples are small, from one to nine problems, so 16 to 19 hours is a range
+  and not a forecast.
