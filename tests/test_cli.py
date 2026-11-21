@@ -1,6 +1,7 @@
 """The `pi` command, run in-process against a local stand-in for Ollama."""
 
 import hashlib
+import io
 import json
 import socket
 import subprocess
@@ -332,3 +333,28 @@ def test_report_explains_a_directory_that_holds_no_run(tmp_path, capsys):
 
     assert status == 1
     assert "nothing-here" in capsys.readouterr().err
+
+
+def test_eval_shows_each_result_as_it_finishes_when_its_output_is_piped(
+    ollama, tmp_path, monkeypatch
+):
+    # A pipe is block-buffered, so an unflushed line stays hidden until the run ends.
+    answer_one_of_three(ollama)
+    events = []
+
+    class Pipe(io.StringIO):
+        def write(self, text):
+            events.append(("write", text))
+            return super().write(text)
+
+        def flush(self):
+            events.append(("flush", ""))
+
+    monkeypatch.setattr(sys, "stdout", Pipe())
+
+    main(eval_arguments(tmp_path, ollama))
+
+    for marker, following in (("[1/3]", "[2/3]"), ("[2/3]", "[3/3]")):
+        written = next(i for i, (kind, text) in enumerate(events) if marker in text)
+        next_line = next(i for i, (kind, text) in enumerate(events) if following in text)
+        assert ("flush", "") in events[written:next_line]

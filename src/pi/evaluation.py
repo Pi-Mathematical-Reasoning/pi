@@ -42,9 +42,10 @@ def run_evaluation(
     command: list[str],
     code: dict | None,
     clock=time.monotonic,
-    report=print,
+    report=None,
 ) -> dict:
     """Attempt every problem that has no result yet, and return the run's description."""
+    report = report or _announce
     out = Path(out)
     checkpoint = inspect_checkpoint(config, client)
     _check_references(problems)
@@ -184,6 +185,11 @@ def _check_references(problems: list[Problem]) -> None:
         raise EvaluationError(
             f"the grader cannot read the reference answer of {len(unreadable)} problem(s): {shown}"
         )
+
+
+def _announce(line: str) -> None:
+    # Flushed, so a run whose output is piped still shows each result as it finishes.
+    print(line, flush=True)
 
 
 def _progress(position: int, total: int, result: dict) -> str:
