@@ -73,6 +73,7 @@ def evaluate(ollama, out, **options):
         "command": ["pi", "eval"],
         "code": {"revision": "abc123", "dirty": False},
         "report": lambda line: None,
+        "read_power": lambda: None,
     }
     settings.update(options)
     return run_evaluation(client=OllamaClient(ollama.host), out=out, **settings)
@@ -116,8 +117,21 @@ def test_a_result_keeps_the_reply_the_token_counts_and_the_time(ollama, tmp_path
         "output_tokens_per_second": 20.0,
         "load_seconds": 9.0,
         "elapsed_seconds": 10.0,
+        "power": None,
     }
     assert second["elapsed_seconds"] == 15.0
+
+
+def test_a_result_says_what_power_the_machine_was_on(ollama, tmp_path):
+    # The same checkpoint generates a third slower on battery, so a time
+    # means little without knowing which it was.
+    battery = {"source": "Battery Power", "mode": "powermode 1"}
+    mains = {"source": "AC Power", "mode": "powermode 2"}
+    readings = iter([battery, mains, mains])
+
+    evaluate(ollama, tmp_path / "run", read_power=lambda: next(readings))
+
+    assert [r["power"] for r in read_results(tmp_path / "run")] == [battery, mains, mains]
 
 
 def test_each_problem_starts_from_a_fresh_load_and_is_sent_only_its_text(ollama, tmp_path):

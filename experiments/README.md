@@ -56,9 +56,9 @@ second probe returned the same reply as the recorded one, token for token, at
 - **Memory is not a constraint.** The peak was 10.1 GiB of 48 GB, with no
   swap, at a 16,384-token context.
 - **Time is the constraint.** *Note added after the development run:* this
-  probe and the sample below ran on battery, in Low Power Mode. On mains the
-  same checkpoint generates about 27 tokens per second, and the development
-  run entry has the current estimate of laptop hours. If every MATH-500
+  probe and the sample below ran on battery. On mains the same checkpoint
+  generates about 27 tokens per second, and the development run entry has the
+  current estimate of laptop hours. If every MATH-500
   problem took as long as this one, 500 problems would take about 18 hours. If every problem ran to the
   8,192-token output limit, they would take about 60 hours. One problem cannot
   say where the average lies; the development run has to measure that before
@@ -174,11 +174,13 @@ texts or solutions.
 - **The strict extraction rule cost nothing.** All 28 finished replies ended
   in a boxed answer. None was `missing`.
 - **The power source changes the speed.** The charger was connected part way
-  through. Problems 1 to 20 ran on battery, where macOS was set to Low Power
-  Mode, at 18.4 tokens per second. Problems 22 to 30 ran on mains, in High
-  Power Mode, at 27.0. Under the current limits this affects time only, but
-  the records do not say which problems ran on which: a run should record its
-  power source, and a scored run should stay on mains throughout.
+  through. Problems 1 to 20 ran on battery at 18.4 tokens per second, and
+  problems 22 to 30 ran on mains at 27.0. macOS's energy mode differs between
+  the two on this Mac: `pmset` reports `powermode 1` on battery and
+  `powermode 2` on mains. Under the current limits this affects time only.
+  This run's records do not say which problems ran on which. Runs made since
+  record the power source of every attempt, and a scored run should stay on
+  mains throughout.
 - **Laptop hours for MATH-500.** At this run's mean of 3,660 tokens, 500
   problems take about 19 hours on mains and about 28 on battery. That is
   probably high: Intermediate Algebra used far more tokens than any other

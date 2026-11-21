@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pi.checkpoint import inspect_checkpoint
 from pi.config import Config
 from pi.ollama import OllamaClient, OllamaTimeout
-from pi.resources import ResourceSampler, without_home
+from pi.resources import ResourceSampler, read_power, without_home
 
 
 def run_probe(
@@ -23,9 +23,11 @@ def run_probe(
     command: list[str],
     code: dict | None,
     clock=time.monotonic,
+    read_power=read_power,
 ) -> dict:
     name = config.model.name
     checkpoint = inspect_checkpoint(config, client)
+    power = read_power()
 
     # Start from a fresh load: the same seed gives different text when the
     # prompt is already in the model's cache.
@@ -77,6 +79,7 @@ def run_probe(
             "swap_before_bytes": sampler.swap_before_bytes,
             "swap_peak_bytes": sampler.swap_peak_bytes,
             "swap_growth_bytes": sampler.swap_growth_bytes,
+            "power": power,
         },
     }
 

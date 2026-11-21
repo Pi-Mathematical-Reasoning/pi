@@ -57,7 +57,7 @@ different text. The record holds:
   with.
 - **The run:** the configuration, the command line and the git revision.
 - **The result:** the reply with its reasoning, the token counts, tokens per
-  second, elapsed time, peak memory and swap growth.
+  second, elapsed time, peak memory, swap growth and the power source.
 
 Memory is measured over the Ollama server and the processes it launches, and
 swap growth is measured on macOS only.
@@ -90,8 +90,9 @@ problems or the grader have changed since the run began.
 
 A run directory holds two files. `run.json` says what was run and whether it
 is complete. `results.jsonl` has one line per problem: the reply, the final
-answer read from it, the verdict, the token counts and the time. `pi report`
-rebuilds the score from those two files alone, so it needs no model.
+answer read from it, the verdict, the token counts, the time, and whether the
+machine was on battery or mains. `pi report` rebuilds the score from those
+two files alone, so it needs no model.
 
 | Benchmark | Problems | Use |
 | --- | --- | --- |
@@ -102,9 +103,10 @@ The problem file is fetched on first use into `data/` and checked against the
 checksum pinned in the benchmark definition. Problem files are never
 committed.
 
-A problem takes about two minutes, so the 30 development problems take about
-an hour. On a Mac, start a long run with `caffeinate -i` in front of the
-command so the machine does not sleep part way.
+A problem takes two to three minutes, so the 30 development problems take
+about an hour and a half. On a Mac, run on mains power: this checkpoint
+generates a third slower on battery. Start a long run with `caffeinate -i` in
+front of the command so the machine does not sleep part way.
 
 ## Layout
 
