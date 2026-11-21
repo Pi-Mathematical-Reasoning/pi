@@ -316,3 +316,21 @@ def test_every_committed_mirror_names_its_files_checksum(tmp_path):
         benchmark = load_benchmark(path)
         if benchmark.mirror is not None:
             assert f"/{benchmark.sha256}/" in benchmark.mirror, path.name
+
+
+def test_a_definition_may_mark_its_benchmark_as_scored(tmp_path):
+    assert load_benchmark(write(tmp_path, DEFINITION)).scored is False
+    assert load_benchmark(write(tmp_path, DEFINITION + "scored = true\n")).scored is True
+
+
+def test_refuses_a_scored_setting_that_is_not_true_or_false(tmp_path):
+    with pytest.raises(BenchmarkError, match="scored"):
+        load_benchmark(write(tmp_path, DEFINITION + 'scored = "yes"\n'))
+
+
+def test_only_math_500_is_scored():
+    definitions = sorted((Path(__file__).parent.parent / "benchmarks").glob("*.toml"))
+
+    scored = {path.stem for path in definitions if load_benchmark(path).scored}
+
+    assert scored == {"math-500"}

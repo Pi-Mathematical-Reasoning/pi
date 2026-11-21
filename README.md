@@ -116,6 +116,30 @@ aws sso login --profile jaws-prod
 export AWS_PROFILE=jaws-prod
 ```
 
+### Scored runs
+
+A benchmark definition with `scored = true` (today, `math-500`) is held to a
+stricter standard, so that its score can be trusted:
+
+- **Committed code only.** `pi eval` refuses to start or resume from a working
+  tree with uncommitted changes, so every result names the commit it came from.
+- **Verified weights.** Each session hashes Ollama's weights file, about six
+  seconds for Qwen3-14B, and refuses one whose content does not match its name.
+- **Mains power.** An attempt never starts on battery, where this Mac generates
+  a third slower. The run stops instead; plug in and resume.
+
+Every run, scored or not, also keeps:
+
+- **Its sessions.** Each one is recorded when it starts, with the command, the
+  commit, the machine, macOS and Python, so a run killed outright still says
+  what produced its results. Each result names its session and start time.
+- **The model runner's launch settings.** These include the cache type and
+  flash attention, which change the numbers. If they change part way through,
+  the run stops before keeping the attempt.
+- **Awake attempts only.** An attempt the Mac slept through is thrown away and
+  made again, because its time measured the sleep. A fresh load makes the new
+  attempt write the same reply.
+
 A problem takes two to three minutes on average and up to ten, so the 30
 development problems take about an hour and a half. On a Mac, run on mains
 power: this checkpoint generates a third slower on battery. Start a long run

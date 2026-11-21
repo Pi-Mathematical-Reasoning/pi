@@ -13,9 +13,11 @@ from pi.resources import (
     parse_power,
     parse_process_table,
     parse_swap_used_bytes,
+    read_machine,
     read_ollama_tree,
     read_power,
     read_swap_used_bytes,
+    read_wake,
 )
 
 # pid, parent pid, resident KiB, command. The server (964) launched the runner
@@ -240,3 +242,20 @@ def test_the_real_power_reader_works_on_this_machine():
         assert power["source"] in ("AC Power", "Battery Power")
     else:
         assert power is None
+
+
+def test_reads_the_machine_it_runs_on():
+    machine = read_machine()
+
+    assert machine["python"].count(".") == 2
+    if sys.platform == "darwin":
+        assert machine["chip"] and machine["model"] and machine["memory_bytes"] > 0
+        assert machine["os"].startswith("macOS ")
+
+
+def test_reads_the_last_wake_from_sleep():
+    wake = read_wake()
+
+    assert wake is None or isinstance(wake, str)
+    if sys.platform == "darwin":
+        assert wake
