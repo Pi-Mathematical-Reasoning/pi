@@ -101,7 +101,9 @@ def test_a_result_keeps_the_reply_the_token_counts_and_the_time(ollama, tmp_path
     evaluate(ollama, tmp_path / "run", clock=lambda: next(ticks))
 
     first, second, _ = read_results(tmp_path / "run")
+    assert first.pop("started_at").endswith("+00:00")
     assert first == {
+        "session": 0,
         "id": "dev/1",
         "subject": "Algebra",
         "level": 1,
@@ -177,6 +179,7 @@ def test_a_finished_run_is_marked_complete_and_says_what_it_ran(ollama, tmp_path
         "url": "https://example.com/problems.jsonl",
         "sha256": "abc123",
         "subset": False,
+        "scored": False,
         "ids": ["dev/1", "dev/2", "dev/3"],
     }
     assert run["model"]["digest"] == DIGEST

@@ -4,6 +4,7 @@ Ollama serves the model from a child process of its server, so memory is
 measured over the server and everything it launched, not over this process.
 """
 
+import platform
 import re
 import subprocess
 import sys
@@ -104,6 +105,44 @@ def read_power() -> dict | None:
     status = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, check=True)
     settings = subprocess.run(["pmset", "-g"], capture_output=True, text=True, check=True)
     return parse_power(status.stdout, settings.stdout)
+
+
+def read_wake() -> str | None:
+    """When the machine last woke from sleep, or None where this is not read (off macOS).
+
+    It changes only when the machine wakes, so a value that differs after an
+    attempt from before it means the machine slept during the attempt.
+    """
+    if sys.platform != "darwin":
+        return None
+    return _sysctl("kern.waketime")
+
+
+def read_machine() -> dict:
+    """The machine a run is on: what a reader needs to compare its times with another's."""
+    machine = {"python": platform.python_version()}
+    if sys.platform == "darwin":
+        machine.update(
+            model=_sysctl("hw.model"),
+            chip=_sysctl("machdep.cpu.brand_string"),
+            memory_bytes=int(_sysctl("hw.memsize")),
+            os="macOS {} ({})".format(
+                *(
+                    subprocess.run(
+                        ["sw_vers", flag], capture_output=True, text=True, check=True
+                    ).stdout.strip()
+                    for flag in ("-productVersion", "-buildVersion")
+                )
+            ),
+        )
+    else:
+        machine.update(os=platform.platform())
+    return machine
+
+
+def _sysctl(name: str) -> str:
+    done = subprocess.run(["sysctl", "-n", name], capture_output=True, text=True, check=True)
+    return done.stdout.strip()
 
 
 def read_ollama_tree() -> OllamaTree | None:

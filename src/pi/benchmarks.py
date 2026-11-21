@@ -44,6 +44,9 @@ class Benchmark:
     format: str
     ids: tuple[str, ...] | None  # a frozen subset, or None for every problem in the file
     mirror: str | None = None  # s3://bucket/key holding the same bytes, tried first
+    # A scored benchmark is held to a stricter standard: committed code, mains
+    # power and verified weights (pi.evaluation).
+    scored: bool = False
 
 
 @dataclass(frozen=True)
@@ -63,7 +66,7 @@ def load_benchmark(path: Path) -> Benchmark:
         raise BenchmarkError(f"{path} is not valid TOML: {error}") from None
 
     required = ("name", "url", "sha256", "format")
-    unknown = sorted(set(data) - {*required, "ids", "mirror"})
+    unknown = sorted(set(data) - {*required, "ids", "mirror", "scored"})
     if unknown:
         raise BenchmarkError(f"{path}: unknown setting {unknown[0]}")
     for key in required:
@@ -78,6 +81,9 @@ def load_benchmark(path: Path) -> Benchmark:
     mirror = data.get("mirror")
     if mirror is not None and not (isinstance(mirror, str) and _S3_URI.match(mirror)):
         raise BenchmarkError(f"{path}: mirror must be an s3://bucket/key URI, not {mirror!r}")
+    scored = data.get("scored", False)
+    if not isinstance(scored, bool):
+        raise BenchmarkError(f"{path}: scored must be true or false, not {scored!r}")
     return Benchmark(
         name=data["name"],
         url=data["url"],
@@ -85,6 +91,7 @@ def load_benchmark(path: Path) -> Benchmark:
         format=data["format"],
         ids=None if ids is None else tuple(ids),
         mirror=mirror,
+        scored=scored,
     )
 
 
