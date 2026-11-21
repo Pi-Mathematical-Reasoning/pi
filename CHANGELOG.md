@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/Pi-Mathematical-Reasoning/pi/compare/v0.1.0...v0.2.0) (2026-11-21)
+
+
+### Features
+
+* add the answer grader ([#7](https://github.com/Pi-Mathematical-Reasoning/pi/issues/7)) ([4b0ab98](https://github.com/Pi-Mathematical-Reasoning/pi/commit/4b0ab98845f97d1f0b00978620f32149779eaa7d))
+
 ## 0.1.0 (2026-11-21)
 
 
