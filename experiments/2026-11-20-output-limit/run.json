@@ -1,0 +1,77 @@
+{
+  "kind": "evaluation",
+  "complete": true,
+  "runtime": {
+    "name": "ollama",
+    "version": "0.40.13"
+  },
+  "model": {
+    "name": "qwen3:14b",
+    "digest": "bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8",
+    "weights": "sha256-a8cc1361f3145dc01f6d77c6c82c9116b9ffe3c97b34716fe20418455876c40e",
+    "format": "gguf",
+    "parameter_size": "14.8B",
+    "quantization": "Q4_K_M",
+    "default_parameters": "repeat_penalty                 1\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\ntemperature                    0.6\ntop_k                          20\ntop_p                          0.95",
+    "tokenizer": {
+      "tokenizer.ggml.add_bos_token": false,
+      "tokenizer.ggml.bos_token_id": 151643,
+      "tokenizer.ggml.eos_token_id": 151645,
+      "tokenizer.ggml.model": "gpt2",
+      "tokenizer.ggml.padding_token_id": 151643,
+      "tokenizer.ggml.pre": "qwen2"
+    }
+  },
+  "generation": {
+    "think": true,
+    "context_length": 24576,
+    "max_output_tokens": 16384,
+    "temperature": 0.6,
+    "top_p": 0.95,
+    "top_k": 20,
+    "seed": 1,
+    "time_limit_seconds": 1200.0
+  },
+  "benchmark": {
+    "name": "math-dev",
+    "url": "https://huggingface.co/datasets/nlile/hendrycks-MATH-benchmark/resolve/465bcdb36f5962aa3512891498966df785fc3c18/data/train-00000-of-00001.parquet",
+    "sha256": "5bb914caa970c120a9a139ccedef764da11e62965ac31f4dfff3ccf774199375",
+    "subset": true,
+    "ids": [
+      "train/intermediate_algebra/290.json",
+      "train/intermediate_algebra/1720.json"
+    ]
+  },
+  "grader": {
+    "rules": 1,
+    "math_verify": "0.9.0",
+    "latex2sympy2_extended": "1.11.0",
+    "sympy": "1.14.0"
+  },
+  "sessions": [
+    {
+      "started_at": "2026-11-21T05:02:52+00:00",
+      "command": [
+        "pi",
+        "eval",
+        "--config",
+        "runs/output-limit/config.toml",
+        "--benchmark",
+        "runs/output-limit/benchmark.toml",
+        "--out",
+        "runs/output-limit/run"
+      ],
+      "code": {
+        "revision": "7c5f762938938c6f8a83ecb863fc78b6ff378c45",
+        "dirty": false
+      },
+      "attempted": 2,
+      "ended_at": "2026-11-21T05:15:36+00:00",
+      "peak_memory_bytes": 12351471616,
+      "swap_growth_bytes": 0,
+      "runner_commands": [
+        "/opt/homebrew/Cellar/ollama/0.40.13/libexec/lib/ollama/llama-server --model ~/.ollama/models/blobs/sha256-a8cc1361f3145dc01f6d77c6c82c9116b9ffe3c97b34716fe20418455876c40e --port 65046 --host 127.0.0.1 --no-webui --offline -c 24576 -np 1 --log-verbosity 4 --no-log-prefix --no-log-timestamps --no-jinja --chat-template chatml --load-mode none --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on -b 512 -ub 512 --context-shift --keep 4"
+      ]
+    }
+  ]
+}

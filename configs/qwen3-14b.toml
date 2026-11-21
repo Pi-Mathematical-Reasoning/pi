@@ -1,7 +1,8 @@
 # The original checkpoint for the local baseline: Qwen3-14B as Ollama serves it.
 #
-# The limits and the seed below are provisional. The brief has them fixed
-# before the scored run, once a development run has shown what they cost.
+# The limits below were set from the development runs of 2026-11-20, which
+# are in the experiment log. The brief has every setting here fixed before the
+# scored run, and none may change once that run has started.
 
 [model]
 # The Ollama tag, and the manifest digest that `ollama list` abbreviates.
@@ -19,10 +20,14 @@ temperature = 0.6
 top_p = 0.95
 top_k = 20
 seed = 1
-# The problem and the whole reply must fit in the context together.
-context_length = 16384
-max_output_tokens = 8192
-time_limit_seconds = 600
+# The output limit is twice the first one tried: at 8,192 tokens, 2 of the 30
+# development problems were cut off, and both finished correctly with more.
+# The problem and the whole reply must fit in the context together. The time
+# limit is reached only below 14 tokens a second, slower than this Mac runs
+# even on battery.
+context_length = 24576
+max_output_tokens = 16384
+time_limit_seconds = 1200
 
 [probe]
 # An original problem in the style of the harder MATH problems. It is not

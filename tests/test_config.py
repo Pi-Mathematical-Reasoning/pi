@@ -1,5 +1,7 @@
 """Loading a run configuration: the model pin and the generation settings."""
 
+from pathlib import Path
+
 import pytest
 
 from pi.config import ConfigError, load_config
@@ -93,3 +95,20 @@ def test_accepts_a_whole_number_for_a_decimal_setting(tmp_path):
 def test_reports_a_missing_file_as_a_config_error(tmp_path):
     with pytest.raises(ConfigError, match="no-such-file.toml"):
         load_config(tmp_path / "no-such-file.toml")
+
+
+def test_refuses_an_output_limit_that_leaves_no_room_for_the_problem(tmp_path):
+    # The problem and the whole reply share the context, so a reply as long
+    # as the context could never be finished.
+    no_room = VALID.replace("max_output_tokens = 8192", "max_output_tokens = 16384")
+
+    with pytest.raises(ConfigError, match=r"generation\.max_output_tokens"):
+        load_config(write(tmp_path, no_room))
+
+
+def test_every_committed_configuration_loads():
+    configs = sorted((Path(__file__).parent.parent / "configs").glob("*.toml"))
+
+    assert configs, "no committed configuration to check"
+    for path in configs:
+        load_config(path)

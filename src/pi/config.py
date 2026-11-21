@@ -62,7 +62,16 @@ def load_config(path: Path) -> Config:
     unknown = sorted(set(data) - set(sections))
     if unknown:
         raise ConfigError(f"{path}: unknown section [{unknown[0]}]")
-    return Config(**{name: _section(path, data, name, cls) for name, cls in sections.items()})
+    config = Config(**{name: _section(path, data, name, cls) for name, cls in sections.items()})
+
+    generation = config.generation
+    if generation.max_output_tokens >= generation.context_length:
+        raise ConfigError(
+            f"{path}: generation.max_output_tokens ({generation.max_output_tokens}) must be "
+            f"smaller than generation.context_length ({generation.context_length}), "
+            "because the problem and the reply share the context"
+        )
+    return config
 
 
 def _section(path: Path, data: dict, name: str, cls: type):

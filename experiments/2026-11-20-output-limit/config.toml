@@ -1,0 +1,31 @@
+# The original checkpoint for the local baseline: Qwen3-14B as Ollama serves it.
+#
+# The limits and the seed below are provisional. The brief has them fixed
+# before the scored run, once a development run has shown what they cost.
+
+[model]
+# The Ollama tag, and the manifest digest that `ollama list` abbreviates.
+# pi refuses to run if the installed model has any other digest.
+name = "qwen3:14b"
+digest = "bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8"
+
+[runtime]
+host = "http://127.0.0.1:11434"
+
+[generation]
+# Reasoning mode on, with the sampling settings the Ollama model ships with.
+think = true
+temperature = 0.6
+top_p = 0.95
+top_k = 20
+seed = 1
+# The problem and the whole reply must fit in the context together.
+context_length = 24576
+max_output_tokens = 16384
+time_limit_seconds = 1200
+
+[probe]
+# An original problem in the style of the harder MATH problems. It is not
+# taken from any benchmark, so the probe never touches evaluation data.
+# The answer is 12.
+problem = "Find the sum of all real numbers $x$ that satisfy $|x^2 - 6x + 5| = 3$."

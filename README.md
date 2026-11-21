@@ -29,7 +29,7 @@ checkpoint; training comes after that measurement.
 
 | Stage | What it measures | State |
 | --- | --- | --- |
-| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | In progress: the development run is done (28 of 30); the limits are still to be fixed, and then the scored MATH-500 run |
+| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | In progress: the development run is done and the limits are set; the scored MATH-500 run has not been started |
 | Milestone 2: proof writing | Fraction of a pinned miniF2F subset proved, graded by Lean 4 | Not started |
 | Later experiments | Lean-guided revision, fine-tuning on AWS, a larger-model comparison | Not started |
 
@@ -103,8 +103,8 @@ The problem file is fetched on first use into `data/` and checked against the
 checksum pinned in the benchmark definition. Problem files are never
 committed.
 
-A problem takes two to three minutes, so the 30 development problems take
-about an hour and a half. On a Mac, run on mains power: this checkpoint
+A problem takes two to three minutes on average and up to ten, so the 30
+development problems take about an hour and a half. On a Mac, run on mains power: this checkpoint
 generates a third slower on battery. Start a long run with `caffeinate -i` in
 front of the command so the machine does not sleep part way.
 
