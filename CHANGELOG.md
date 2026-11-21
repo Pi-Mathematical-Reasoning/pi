@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/Pi-Mathematical-Reasoning/pi/compare/v0.3.0...v0.4.0) (2026-11-21)
+
+
+### Features
+
+* read benchmark files from the s3 mirror first ([#14](https://github.com/Pi-Mathematical-Reasoning/pi/issues/14)) ([b076bb7](https://github.com/Pi-Mathematical-Reasoning/pi/commit/b076bb7b26ba0c4b7fa55b9b95ea945839e41f46))
+* record the power source of each attempt ([#11](https://github.com/Pi-Mathematical-Reasoning/pi/issues/11)) ([2a1adda](https://github.com/Pi-Mathematical-Reasoning/pi/commit/2a1adda34bae71e944e91c5c810f49fbfc3bbe1b))
+* set the output limit to 16,384 tokens ([#12](https://github.com/Pi-Mathematical-Reasoning/pi/issues/12)) ([521c544](https://github.com/Pi-Mathematical-Reasoning/pi/commit/521c5443d627b10c2be57e66fe5f5a39e93e8420))
+
 ## [0.3.0](https://github.com/Pi-Mathematical-Reasoning/pi/compare/v0.2.0...v0.3.0) (2026-11-21)
 
 
