@@ -1,5 +1,8 @@
 # Pi
 
+[![CI](https://github.com/Pi-Mathematical-Reasoning/pi/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/Pi-Mathematical-Reasoning/pi/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Pi-Mathematical-Reasoning/pi/blob/main/LICENSE)
+
 Pi is a local-first mathematical reasoning project. You ask an open-weight
 model for a proof and get back a Lean 4 file that can be checked
 independently. Given a compute budget, Pi returns either a complete,
@@ -31,6 +34,8 @@ checkpoint; training comes after that measurement.
 PI_PROJECT.md    the project brief
 src/pi/          the Python package, empty so far
 tests/           tests, run with pytest
+scripts/         the local check suite and the repository settings
+tools/           the commit message rule
 ```
 
 ## Development
@@ -43,6 +48,12 @@ uv sync
 uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
+
+## Contributing
+
+Every change reaches `main` through a pull request with a Conventional
+Commit title, and commits are a single line. [CONTRIBUTING.md](CONTRIBUTING.md)
+has the setup and the rules; coding agents read [AGENTS.md](AGENTS.md).
 
 ## License
 

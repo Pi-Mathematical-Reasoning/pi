@@ -1,0 +1,3 @@
+fix: count timeouts as unsolved
+
+Co-authored-by: Jane Doe

@@ -1,0 +1,3 @@
+fix: count timeouts as unsolved
+
+Closes #12
