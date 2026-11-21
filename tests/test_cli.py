@@ -116,3 +116,67 @@ def test_the_package_runs_as_a_module():
 
     assert done.returncode == 0
     assert "probe" in done.stdout
+
+
+def test_grade_accepts_an_equivalent_form_of_the_reference(capsys):
+    status = main(["grade", "--reference", r"\frac{1}{2}", "--reply", r"So it is $\boxed{0.5}$."])
+
+    printed = capsys.readouterr().out
+    assert status == 0
+    assert printed.splitlines()[0] == "correct"
+    assert "math-verify" in printed
+
+
+def test_grade_reports_a_wrong_answer(capsys):
+    main(["grade", "--reference", "12", "--reply", r"So it is $\boxed{13}$."])
+
+    assert capsys.readouterr().out.splitlines()[0] == "incorrect"
+
+
+def test_grade_reports_a_reply_with_no_final_answer(capsys):
+    main(["grade", "--reference", "12", "--reply", "I could not work this out."])
+
+    assert capsys.readouterr().out.splitlines()[0] == "missing"
+
+
+def write_record(tmp_path, response):
+    path = tmp_path / "record.json"
+    path.write_text(json.dumps({"kind": "probe", "response": response}))
+    return str(path)
+
+
+def test_grade_reads_the_reply_from_a_record_and_ignores_the_reasoning(tmp_path, capsys):
+    record = write_record(
+        tmp_path,
+        {
+            "content": r"The sum is $\boxed{12}$.",
+            "thinking": r"Maybe \boxed{99}?",
+            "done_reason": "stop",
+        },
+    )
+
+    main(["grade", "--reference", "12", "--record", record])
+    assert capsys.readouterr().out.splitlines()[0] == "correct"
+
+    main(["grade", "--reference", "99", "--record", record])
+    assert capsys.readouterr().out.splitlines()[0] == "incorrect"
+
+
+def test_grade_treats_a_record_with_no_reply_as_missing(tmp_path, capsys):
+    main(["grade", "--reference", "12", "--record", write_record(tmp_path, None)])
+
+    assert capsys.readouterr().out.splitlines()[0] == "missing"
+
+
+def test_grade_explains_a_reference_it_cannot_read(capsys):
+    status = main(["grade", "--reference", "", "--reply", r"$\boxed{12}$"])
+
+    assert status == 1
+    assert "reference" in capsys.readouterr().err
+
+
+def test_grade_explains_a_record_it_cannot_read(tmp_path, capsys):
+    status = main(["grade", "--reference", "12", "--record", str(tmp_path / "absent.json")])
+
+    assert status == 1
+    assert "absent.json" in capsys.readouterr().err

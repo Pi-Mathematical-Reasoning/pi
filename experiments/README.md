@@ -1,8 +1,9 @@
 # Experiment log
 
-Each entry cites a record committed beside it. A record names the exact
-checkpoint, runtime, configuration and code revision of the run it describes,
-and holds the model's full reply.
+Each entry cites what was kept from the run. A record written by `pi` names
+the exact checkpoint, runtime, configuration and code revision of the run it
+describes, and holds the model's full reply. An entry says so when a run was
+ad hoc and kept less.
 
 ## 2026-11-20: the original checkpoint runs at a practical speed
 
@@ -65,3 +66,49 @@ second probe returned the same reply as the recorded one, token for token, at
   roughly a quarter of an hour over 500 problems.
 - **The limits and the seed in the configuration are provisional.** The brief
   has them fixed before the scored run.
+
+
+## 2026-11-20: the checkpoint boxes its final answer without being asked
+
+**Question.** Given only the problem text, how does the checkpoint present its
+final answer, and does the grader read it?
+
+**Answer.** All eight replies ended with exactly one boxed final answer, and
+the grader read every one of them correctly. That is the evidence for grading
+rules version 1, which accept a boxed or announced final answer and nothing
+else.
+
+**Setup.** Eight original problems from no benchmark, one per answer type.
+The checkpoint and settings are those of `configs/qwen3-14b.toml`, with a
+fresh load before each problem.
+
+This was an ad hoc sample, run with a throwaway script and not a `pi`
+command, so there is no full record. The problems, references, replies and
+timings are kept in
+[tests/replies/answer-format-sample.json](../tests/replies/answer-format-sample.json),
+where the grader's tests use them.
+
+**Result.**
+
+| Answer type | Reference | Final answer as written | Verdict | Output tokens | Seconds |
+| --- | --- | --- | --- | --- | --- |
+| Fraction | `\frac{3}{28}` | `\boxed{\dfrac{3}{28}}` | correct | 2,203 | 113.5 |
+| Interval | `[2,3]` | `\boxed{[2, 3]}` | correct | 1,493 | 77.3 |
+| Ordered pair | `(2,1)` | `\boxed{(2, 1)}` | correct | 1,749 | 90.7 |
+| Radical | `8\sqrt{2}` | `\boxed{8\sqrt{2}}` | correct | 2,174 | 118.9 |
+| Word | `\text{Tuesday}` | `\boxed{Tuesday}` | correct | 3,174 | 180.6 |
+| Polynomial | `x^3-7x-6` | `\boxed{x^3 - 7x - 6}` | correct | 3,199 | 174.8 |
+| Degrees | `70` | `\boxed{70}` | correct | 1,494 | 85.2 |
+| Money | `\$20.40` | `\boxed{20.40}` | correct | 1,564 | 85.7 |
+
+**What it means for the baseline.**
+
+- **The strict extraction rule fits what the model does.** Nothing asks it to
+  box its answer, and it did so every time, so the grader does not need to
+  guess an answer from the last number in a reply.
+- **Eight problems cannot show that it always will.** The development run
+  should count `missing` verdicts and look at each one before the rules are
+  frozen.
+- **Time per problem agrees with the probe.** The mean was 2,131 tokens and
+  116 s, from 77 s to 181 s. These problems are easier than the hardest in
+  MATH, so this is not an estimate for MATH-500.

@@ -52,6 +52,10 @@ the brief, [PI_PROJECT.md](PI_PROJECT.md).
 - **Scored runs follow rules fixed in advance.** The prompt, sampling
   settings, limits and grader are frozen before a scored run and tuned only on
   development problems. A malformed answer or a timeout counts as unsolved.
+- **The grading rules are versioned.** [docs/grading.md](docs/grading.md)
+  states them. A change to how answers are found or compared bumps
+  `RULES_VERSION` in `src/pi/grading.py` and updates that document. Debug the
+  grader on development problems, never on evaluation problems.
 - **Weights and checkpoints never go in git.** The brief keeps durable
   artifacts in S3, checksummed.
 
