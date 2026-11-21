@@ -188,3 +188,51 @@ texts or solutions.
   Weighting by MATH-500's subjects gives about 16 hours on mains. The subject
   samples are small, from one to nine problems, so 16 to 19 hours is a range
   and not a forecast.
+
+## 2026-11-20: the output limit is set to 16,384 tokens
+
+**Question.** Would the two development problems that were cut off at 8,192
+output tokens finish with more room?
+
+**Answer.** Yes. Both finished, and both were correct. One needed 399 more
+tokens and the other 5,304 more. The output limit is now 16,384 tokens, with
+the context and the time limit raised to match.
+
+**Setup.** The two cut-off problems, attempted again with a 16,384-token
+output limit, a 24,576-token context and a 1,200 s time limit. Nothing else
+changed. The Mac was on mains throughout. The run was made from a clean
+checkout of `7c5f762`, which is older than power-source recording, so its
+records do not carry the power source.
+
+The definitions the run used are kept beside its results as `config.toml` and
+`benchmark.toml`. They were in `runs/output-limit/` when the run was made,
+which is the path the recorded command shows.
+
+**Result.**
+
+| Problem | At 8,192 | At 16,384 | Output tokens | Time |
+| --- | --- | --- | --- | --- |
+| `train/intermediate_algebra/290.json` | cut_off | correct | 13,496 | 467 s |
+| `train/intermediate_algebra/1720.json` | cut_off | correct | 8,591 | 296 s |
+
+Peak memory was 11.5 GiB, up from 10.8 GiB with the larger context, and
+there was no swap. Kept from the run, in
+[2026-11-20-output-limit](2026-11-20-output-limit/):
+[report.md](2026-11-20-output-limit/report.md), `run.json` and
+`results.jsonl`.
+
+**What it means for the baseline.**
+
+- **The new limits change where an attempt stops and nothing else.** In both
+  problems the reasoning matched the cut-off attempt character for character,
+  up to the point where that attempt had been cut. So the 28 problems that
+  finished under the old limits should come out the same, which makes the
+  development score 30 of 30 under the new ones. That is inferred: the 28
+  were not attempted again.
+- **The cost is small.** Over the 30 development problems the higher limit
+  adds 5,703 output tokens, about 5%. For MATH-500 that is roughly an hour,
+  for an estimate of 17 to 20 hours on mains.
+- **The time limit stays out of the way.** At 1,200 s it is reached only
+  below 14 tokens per second, and this Mac ran at 18.4 on battery.
+- **It is still a limit.** The harder of the two problems used 82% of it. A
+  problem that needs more than 16,384 tokens is unsolved by rule.
