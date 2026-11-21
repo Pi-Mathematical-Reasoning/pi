@@ -122,10 +122,19 @@ power: this checkpoint generates a third slower on battery. Start a long run
 with `caffeinate -i` in front of the command so the machine does not sleep
 part way.
 
+## Cloud resources
+
+Pi's AWS resources are provisioned by [Jaws](https://github.com/Jaws-Platform/jaws)
+from [`jaws.yaml`](jaws.yaml), as the project `pi-prover`. Today that is one
+private, versioned bucket, `jaws-pi-prover-artifacts`, which keeps the record
+of every published run under `data/runs/<run>/`. Training will add a task
+runner to the same project.
+
 ## Layout
 
 ```text
 PI_PROJECT.md    the project brief
+jaws.yaml        the Jaws project file: Pi's cloud resources
 benchmarks/      benchmark definitions: a pinned problem file, or a frozen subset of one
 configs/         run configurations: a pinned checkpoint and its generation settings
 docs/            the grading rules
