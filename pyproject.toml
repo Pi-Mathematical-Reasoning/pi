@@ -10,7 +10,9 @@ license = "MIT"
 # Capped below 3.14 because MLX, the candidate inference backend, publishes no
 # wheels for it yet. .python-version pins the interpreter uv uses.
 requires-python = ">=3.12,<3.14"
-dependencies = []
+dependencies = [
+    "math-verify==0.9.0",
+]
 
 [project.scripts]
 pi = "pi.cli:main"

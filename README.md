@@ -18,14 +18,16 @@ The full brief, with each milestone and its done condition, is
 
 ## Status
 
-**One thing runs so far: the checkpoint probe.** It loads the pinned
-checkpoint, gives it one problem and records how fast it went and what it cost
-the machine. Nothing is graded yet. The first deliverable is a reproducible
-score for the original checkpoint; training comes after that measurement.
+**Two things run so far: the checkpoint probe and the answer grader.** The
+probe loads the pinned checkpoint, gives it one problem and records how fast
+it went and what it cost the machine. The grader finds the final answer in a
+reply and decides whether it matches a reference. No benchmark has been run
+yet. The first deliverable is a reproducible score for the original
+checkpoint; training comes after that measurement.
 
 | Stage | What it measures | State |
 | --- | --- | --- |
-| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | In progress: the checkpoint is pinned and probed; grading and the scored run are next |
+| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | In progress: the checkpoint is pinned and probed and the grader is written; the benchmark run is next |
 | Milestone 2: proof writing | Fraction of a pinned miniF2F subset proved, graded by Lean 4 | Not started |
 | Later experiments | Lean-guided revision, fine-tuning on AWS, a larger-model comparison | Not started |
 
@@ -58,11 +60,25 @@ different text. The record holds:
 Memory is measured over the Ollama server and the processes it launches, and
 swap growth is measured on macOS only.
 
+## Grade a reply
+
+```sh
+uv run pi grade --reference '\frac{1}{2}' --reply 'So the answer is $\boxed{0.5}$.'
+uv run pi grade --reference 12 --record experiments/2026-11-20-checkpoint-probe/record.json
+```
+
+The grader takes the last boxed expression in the reply as the final answer
+and compares it with the reference as mathematics, so `0.5` matches
+`\frac{1}{2}`. It prints `correct`, `incorrect` or `missing`. The rules, with
+examples of what does and does not count, are in
+[docs/grading.md](docs/grading.md). Grading needs no model.
+
 ## Layout
 
 ```text
 PI_PROJECT.md    the project brief
 configs/         run configurations: a pinned checkpoint and its generation settings
+docs/            the grading rules
 experiments/     the experiment log, and the record of each run it cites
 src/pi/          the Python package
 tests/           tests, run with pytest

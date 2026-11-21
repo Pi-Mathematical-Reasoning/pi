@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from pi.config import ConfigError, load_config
+from pi.grading import grade, grader_version
 from pi.ollama import OllamaClient, OllamaError
 from pi.probe import ProbeError, run_probe, summarize
 from pi.resources import ResourceSampler
@@ -16,7 +17,12 @@ from pi.revision import code_revision
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else list(argv)
     options = _parser().parse_args(arguments)
+    if options.command == "probe":
+        return _probe(options, arguments)
+    return _grade(options)
 
+
+def _probe(options: argparse.Namespace, arguments: list[str]) -> int:
     try:
         config = load_config(options.config)
         record = run_probe(
@@ -28,8 +34,7 @@ def main(argv: list[str] | None = None) -> int:
             code=code_revision(Path(__file__).parent),
         )
     except (ConfigError, ProbeError, OllamaError) as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
+        return _fail(error)
 
     out = options.out or Path("runs") / f"probe-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -39,9 +44,36 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _grade(options: argparse.Namespace) -> int:
+    try:
+        reply = options.reply if options.record is None else _reply_in(options.record)
+        result = grade(reply, options.reference)
+    except (OSError, ValueError) as error:
+        return _fail(error)
+
+    version = grader_version()
+    print(result.verdict)
+    print(f"  final answer   {'none found' if result.answer is None else result.answer}")
+    print(f"  reference      {options.reference}")
+    print(f"  grader         rules {version['rules']}, math-verify {version['math_verify']}")
+    return 0
+
+
+def _reply_in(record: Path) -> str:
+    """The visible reply saved in a record: never the reasoning, and empty if there was none."""
+    response = json.loads(record.read_text()).get("response") or {}
+    return response.get("content", "")
+
+
+def _fail(error: Exception) -> int:
+    print(f"error: {error}", file=sys.stderr)
+    return 1
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pi", description="Local-first mathematical reasoning.")
     commands = parser.add_subparsers(dest="command", required=True)
+
     probe = commands.add_parser(
         "probe",
         help="run one problem and record the checkpoint, its speed and its memory",
@@ -50,4 +82,13 @@ def _parser() -> argparse.ArgumentParser:
     probe.add_argument(
         "--out", type=Path, help="where to write the record (default: runs/probe-<time>.json)"
     )
+
+    grading = commands.add_parser(
+        "grade",
+        help="find the final answer in a reply and compare it with a reference answer",
+    )
+    grading.add_argument("--reference", required=True, help="the reference answer, in LaTeX")
+    source = grading.add_mutually_exclusive_group(required=True)
+    source.add_argument("--reply", help="the reply text to grade")
+    source.add_argument("--record", type=Path, help="a record whose saved reply to grade")
     return parser

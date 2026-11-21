@@ -1,0 +1,74 @@
+[
+ {
+  "kind": "fraction",
+  "problem": "A bag contains 3 red marbles and 5 blue marbles. Two marbles are drawn at random without replacement. What is the probability that both marbles are red? Express your answer as a common fraction.",
+  "reference": "\\frac{3}{28}",
+  "content": "To determine the probability that both marbles drawn at random without replacement are red, we start by analyzing the composition of the bag and the nature of the draw.\n\n---\n\n### **Step 1: Understand the Composition of the Bag**\n\n- **Red marbles:** 3  \n- **Blue marbles:** 5  \n- **Total marbles:** $3 + 5 = 8$\n\nWe are drawing **2 marbles without replacement**, and we want to find the **probability that both are red**.\n\n---\n\n### **Step 2: Use the Multiplication Rule for Dependent Events**\n\nSince the marbles are drawn **without replacement**, the outcome of the first draw affects the second. This is a case of **dependent events**.\n\n- **Probability that the first marble is red:**  \n  $$\n  \\frac{3}{8}\n  $$\n\n- **After drawing a red marble, 2 red marbles remain and 7 total marbles are left.**  \n  **Probability that the second marble is also red:**  \n  $$\n  \\frac{2}{7}\n  $$\n\n- **Multiply the two probabilities** to find the probability that **both** marbles are red:\n  $$\n  \\frac{3}{8} \\times \\frac{2}{7} = \\frac{6}{56}\n  $$\n\n- Simplify the fraction:\n  $$\n  \\frac{6}{56} = \\frac{3}{28}\n  $$\n\n---\n\n### **Step 3: Verify Using Combinations**\n\nAnother approach is using **combinations** to count the number of favorable and total outcomes:\n\n- **Total number of ways to choose 2 marbles from 8:**  \n  $$\n  \\binom{8}{2} = \\frac{8 \\times 7}{2} = 28\n  $$\n\n- **Number of ways to choose 2 red marbles from 3 red ones:**  \n  $$\n  \\binom{3}{2} = 3\n  $$\n\n- **Probability that both marbles are red:**  \n  $$\n  \\frac{3}{28}\n  $$\n\nThis confirms our earlier result.\n\n---\n\n### **Conclusion**\n\nBoth the multiplication rule and combination method lead to the same result. Thus, the probability that both marbles drawn are red is:\n\n$$\n\\boxed{\\dfrac{3}{28}}\n$$",
+  "output_tokens": 2203,
+  "seconds": 113.5,
+  "done_reason": "stop"
+ },
+ {
+  "kind": "interval",
+  "problem": "Find all real numbers $x$ such that $x^2 - 5x + 6 \\le 0$. Express your answer in interval notation.",
+  "reference": "[2,3]",
+  "content": "To solve the inequality:\n\n$$\nx^2 - 5x + 6 \\le 0\n$$\n\n---\n\n### Step 1: Factor the Quadratic Expression\n\nWe begin by factoring the quadratic expression on the left-hand side.\n\n$$\nx^2 - 5x + 6 = (x - 2)(x - 3)\n$$\n\nThis factorization is verified because:\n\n$$\n(x - 2)(x - 3) = x^2 - 3x - 2x + 6 = x^2 - 5x + 6\n$$\n\n---\n\n### Step 2: Find the Roots\n\nSetting the factored expression equal to zero gives the roots:\n\n$$\n(x - 2)(x - 3) = 0 \\Rightarrow x = 2 \\text{ or } x = 3\n$$\n\nThese are the points where the parabola crosses the x-axis.\n\n---\n\n### Step 3: Determine the Parabola's Direction\n\nThe coefficient of $x^2$ is positive (1), so the parabola **opens upwards**.\n\nThis means the quadratic expression is:\n\n- **Negative** between the roots (i.e., for $x$ between 2 and 3),\n- **Zero** at the roots (i.e., at $x = 2$ and $x = 3$),\n- **Positive** outside the roots (i.e., for $x < 2$ or $x > 3$).\n\n---\n\n### Step 4: Solve the Inequality\n\nWe are looking for values of $x$ such that:\n\n$$\nx^2 - 5x + 6 \\le 0\n$$\n\nThis corresponds to the region where the quadratic is **less than or equal to zero**, which is **between the roots**, including the endpoints.\n\n$$\nx \\in [2, 3]\n$$\n\n---\n\n### Final Answer\n\n$$\n\\boxed{[2, 3]}\n$$",
+  "output_tokens": 1493,
+  "seconds": 77.3,
+  "done_reason": "stop"
+ },
+ {
+  "kind": "ordered-pair",
+  "problem": "Find the ordered pair $(x,y)$ that satisfies the system of equations $2x + 3y = 7$ and $x - y = 1$.",
+  "reference": "(2,1)",
+  "content": "To solve the system of equations:\n\n$$\n\\begin{cases}\n2x + 3y = 7 \\\\\nx - y = 1\n\\end{cases}\n$$\n\n---\n\n### Step 1: Use Substitution\n\nFrom the second equation:\n\n$$\nx - y = 1 \\Rightarrow x = y + 1\n$$\n\nNow substitute $ x = y + 1 $ into the first equation:\n\n$$\n2x + 3y = 7 \\Rightarrow 2(y + 1) + 3y = 7\n$$\n\nSimplify:\n\n$$\n2y + 2 + 3y = 7 \\Rightarrow 5y + 2 = 7\n$$\n\nSubtract 2 from both sides:\n\n$$\n5y = 5 \\Rightarrow y = 1\n$$\n\nNow substitute $ y = 1 $ back into $ x = y + 1 $:\n\n$$\nx = 1 + 1 = 2\n$$\n\n---\n\n### Step 2: Verify the Solution\n\nCheck the solution $ (x, y) = (2, 1) $ in both original equations.\n\n1. $ 2x + 3y = 2(2) + 3(1) = 4 + 3 = 7 $ ✅  \n2. $ x - y = 2 - 1 = 1 $ ✅\n\n---\n\n### Step 3: Confirm with Elimination Method\n\nMultiply the second equation by 2:\n\n$$\n2(x - y) = 2(1) \\Rightarrow 2x - 2y = 2\n$$\n\nNow subtract this from the first equation:\n\n$$\n(2x + 3y) - (2x - 2y) = 7 - 2 \\Rightarrow 5y = 5 \\Rightarrow y = 1\n$$\n\nThen from $ x - y = 1 $, substitute $ y = 1 $:\n\n$$\nx - 1 = 1 \\Rightarrow x = 2\n$$\n\n---\n\n### Conclusion\n\nBoth substitution and elimination methods confirm the solution. Hence, the ordered pair that satisfies the system is:\n\n$$\n\\boxed{(2, 1)}\n$$",
+  "output_tokens": 1749,
+  "seconds": 90.7,
+  "done_reason": "stop"
+ },
+ {
+  "kind": "radical",
+  "problem": "Simplify $\\sqrt{50} + \\sqrt{18}$. Express your answer in simplest radical form.",
+  "reference": "8\\sqrt{2}",
+  "content": "To simplify the expression $\\sqrt{50} + \\sqrt{18}$, we begin by breaking each square root into its simplest radical form. This involves factoring out any perfect square components from under the radical.\n\n---\n\n### Step 1: Simplify $\\sqrt{50}$\n\nWe factor 50 as:\n$$\n\\sqrt{50} = \\sqrt{25 \\cdot 2} = \\sqrt{25} \\cdot \\sqrt{2} = 5\\sqrt{2}\n$$\n\n---\n\n### Step 2: Simplify $\\sqrt{18}$\n\nWe factor 18 as:\n$$\n\\sqrt{18} = \\sqrt{9 \\cdot 2} = \\sqrt{9} \\cdot \\sqrt{2} = 3\\sqrt{2}\n$$\n\n---\n\n### Step 3: Combine Like Terms\n\nNow that both radicals have been simplified and expressed with the same radical $\\sqrt{2}$, we can add them:\n\n$$\n5\\sqrt{2} + 3\\sqrt{2} = (5 + 3)\\sqrt{2} = 8\\sqrt{2}\n$$\n\n---\n\n### Final Answer\n\n$$\n\\boxed{8\\sqrt{2}}\n$$",
+  "output_tokens": 2174,
+  "seconds": 118.9,
+  "done_reason": "stop"
+ },
+ {
+  "kind": "word",
+  "problem": "In a year that is not a leap year, January 1 falls on a Monday. On what day of the week does the 100th day of the year fall?",
+  "reference": "\\text{Tuesday}",
+  "content": "To determine the day of the week on which the **100th day of the year** falls, given that **January 1 is a Monday** and the year is **not a leap year**, we can approach the problem systematically.\n\n---\n\n### Step 1: Understand the structure of a non-leap year\n\nA **non-leap year** has **365 days**. Since a week consists of **7 days**, the days of the week repeat every 7 days. This cyclical nature is key to solving the problem.\n\n---\n\n### Step 2: Determine how many days are between January 1 and the 100th day\n\nSince **January 1 is the first day of the year**, the **100th day** is **99 days after** January 1.\n\nWe can now compute:\n\n$$\n99 \\div 7 = 14 \\text{ weeks and } 1 \\text{ day}\n$$\n\nThis means that 99 days consist of **14 full weeks** (which brings us back to the same day of the week) and **1 extra day**.\n\n---\n\n### Step 3: Determine the day of the week\n\nIf **January 1 is a Monday**, then:\n\n- 14 weeks later is still a **Monday**.\n- Adding **1 more day** from Monday brings us to **Tuesday**.\n\nThus, the **100th day of the year** falls on a **Tuesday**.\n\n---\n\n### Step 4: Cross-verify with an alternative approach\n\nWe can also determine the **date** corresponding to the 100th day:\n\n- **January** has 31 days → Days 1 to 31\n- **February** has 28 days → Days 32 to 59\n- **March** has 31 days → Days 60 to 90\n- **April** has 30 days → Days 91 to 120\n\nThus, the **100th day** is the **10th day of April**.\n\nNow, knowing that **January 1 is a Monday**, we can determine the day of the week for **April 10**:\n\n- **January 1** = Monday\n- **January 31** = Wednesday (30 days later)\n- **February 28** = Wednesday (28 days later)\n- **March 31** = Saturday (31 days later)\n- **April 1** = Sunday\n- **April 10** = **Tuesday**\n\nThis confirms our earlier conclusion.\n\n---\n\n### Final Answer\n\n$$\n\\boxed{Tuesday}\n$$",
+  "output_tokens": 3174,
+  "seconds": 180.6,
+  "done_reason": "stop"
+ },
+ {
+  "kind": "polynomial",
+  "problem": "Expand the product $(x+2)(x-3)(x+1)$.",
+  "reference": "x^3-7x-6",
+  "content": "To expand the product $(x + 2)(x - 3)(x + 1)$, we will proceed step by step using the distributive property and simplifying the result at each stage.\n\n---\n\n### **Step 1: Multiply the First Two Binomials**\n\nWe start by multiplying $(x + 2)$ and $(x - 3)$:\n\n$$\n(x + 2)(x - 3) = x \\cdot x + x \\cdot (-3) + 2 \\cdot x + 2 \\cdot (-3)\n$$\n$$\n= x^2 - 3x + 2x - 6 = x^2 - x - 6\n$$\n\n---\n\n### **Step 2: Multiply the Result by the Third Binomial**\n\nNow, we multiply the result from the previous step, $x^2 - x - 6$, by $(x + 1)$:\n\n$$\n(x^2 - x - 6)(x + 1) = x^2 \\cdot x + x^2 \\cdot 1 - x \\cdot x - x \\cdot 1 - 6 \\cdot x - 6 \\cdot 1\n$$\n$$\n= x^3 + x^2 - x^2 - x - 6x - 6\n$$\n\nNow combine like terms:\n\n- $x^2 - x^2 = 0$\n- $-x - 6x = -7x$\n- Constant term: $-6$\n\nSo, the simplified result is:\n\n$$\nx^3 - 7x - 6\n$$\n\n---\n\n### **Final Answer**\n\n$$\n\\boxed{x^3 - 7x - 6}\n$$",
+  "output_tokens": 3199,
+  "seconds": 174.8,
+  "done_reason": "stop"
+ },
+ {
+  "kind": "degrees",
+  "problem": "In triangle $ABC$, angle $A$ measures $50^\\circ$ and angle $B$ measures $60^\\circ$. What is the measure of angle $C$, in degrees?",
+  "reference": "70",
+  "content": "To find the measure of angle $ C $ in triangle $ ABC $, we use the **Triangle Angle Sum Theorem**, which states that the sum of the interior angles of any triangle is always $ 180^\\circ $.\n\nWe are given:\n\n- $ \\angle A = 50^\\circ $\n- $ \\angle B = 60^\\circ $\n\nUsing the angle sum theorem:\n\n$$\n\\angle A + \\angle B + \\angle C = 180^\\circ\n$$\n\nSubstituting the known values:\n\n$$\n50^\\circ + 60^\\circ + \\angle C = 180^\\circ\n$$\n\n$$\n110^\\circ + \\angle C = 180^\\circ\n$$\n\nNow, solve for $ \\angle C $:\n\n$$\n\\angle C = 180^\\circ - 110^\\circ = 70^\\circ\n$$\n\n---\n\n### Final Answer:\n\n$$\n\\boxed{70}\n$$",
+  "output_tokens": 1494,
+  "seconds": 85.2,
+  "done_reason": "stop"
+ },
+ {
+  "kind": "money",
+  "problem": "A shirt costs $\\$24$ and is on sale for $15\\%$ off. What is the sale price, in dollars?",
+  "reference": "\\$20.40",
+  "content": "To determine the sale price of a shirt that originally costs \\$24 and is on sale for 15% off, we can follow a straightforward two-step process:\n\n---\n\n### **Step 1: Calculate the Discount Amount**\n\nA 15% discount means we are reducing the original price by 15%. To find the discount amount:\n\n$$\n\\text{Discount} = 24 \\times 0.15 = 3.60\n$$\n\nSo, the discount is \\$3.60.\n\n---\n\n### **Step 2: Subtract the Discount from the Original Price**\n\nNow, subtract the discount from the original price to get the sale price:\n\n$$\n\\text{Sale Price} = 24 - 3.60 = 20.40\n$$\n\n---\n\n### **Alternative Method: Calculate the Percentage of the Original Price Paid**\n\nInstead of subtracting the discount, we can directly calculate 85% of the original price (since 100% - 15% = 85%):\n\n$$\n\\text{Sale Price} = 24 \\times 0.85 = 20.40\n$$\n\nThis confirms our previous calculation.\n\n---\n\n### **Final Answer**\n\n$$\n\\boxed{20.40}\n$$",
+  "output_tokens": 1564,
+  "seconds": 85.7,
+  "done_reason": "stop"
+ }
+]
