@@ -18,7 +18,7 @@ from pi.checkpoint import inspect_checkpoint
 from pi.config import Config
 from pi.grading import grade, grader_version
 from pi.ollama import OllamaClient, OllamaTimeout
-from pi.resources import ResourceSampler, without_home
+from pi.resources import ResourceSampler, read_power, without_home
 
 RUN = "run.json"
 RESULTS = "results.jsonl"
@@ -43,6 +43,7 @@ def run_evaluation(
     code: dict | None,
     clock=time.monotonic,
     report=None,
+    read_power=read_power,
 ) -> dict:
     """Attempt every problem that has no result yet, and return the run's description."""
     report = report or _announce
@@ -90,7 +91,7 @@ def run_evaluation(
     try:
         with sampler, (out / RESULTS).open("a") as results_file:
             for problem in remaining:
-                result = _attempt(config, client, problem, clock)
+                result = _attempt(config, client, problem, clock, read_power)
                 results_file.write(json.dumps(result) + "\n")
                 results_file.flush()
                 os.fsync(results_file.fileno())
@@ -125,8 +126,10 @@ def read_results(out: Path) -> list[dict]:
     return results
 
 
-def _attempt(config: Config, client: OllamaClient, problem: Problem, clock) -> dict:
+def _attempt(config: Config, client: OllamaClient, problem: Problem, clock, read_power) -> dict:
     name = config.model.name
+    # Battery or mains: the machine generates markedly slower on battery.
+    power = read_power()
     # A fresh load for every problem: the same seed gives different text when
     # the model still holds an earlier prompt in its cache.
     client.unload(name)
@@ -169,6 +172,7 @@ def _attempt(config: Config, client: OllamaClient, problem: Problem, clock) -> d
         "output_tokens_per_second": speed,
         "load_seconds": None if reply is None else reply.load_seconds,
         "elapsed_seconds": elapsed,
+        "power": power,
     }
 
 

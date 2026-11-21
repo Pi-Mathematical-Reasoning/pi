@@ -77,6 +77,35 @@ def parse_swap_used_bytes(text: str) -> int:
     return round(float(match.group(1)) * _UNITS[match.group(2)])
 
 
+_POWER_SOURCE = re.compile(r"drawing from '([^']+)'")
+_ENERGY_MODE = re.compile(r"^\s*((?:low)?powermode)\s+(\d+)\s*$", re.MULTILINE)
+
+
+def parse_power(status: str, settings: str) -> dict:
+    """Parse `pmset -g batt` and `pmset -g`: the power source and the energy mode.
+
+    The energy mode is kept as pmset prints it, such as "powermode 2", because
+    its numbering is not documented.
+    """
+    source = _POWER_SOURCE.search(status)
+    if source is None:
+        raise ValueError(f"cannot read the power source from {status!r}")
+    mode = _ENERGY_MODE.search(settings)
+    return {
+        "source": source.group(1),
+        "mode": None if mode is None else f"{mode.group(1)} {mode.group(2)}",
+    }
+
+
+def read_power() -> dict | None:
+    """Whether the machine is on battery or mains, or None where this is not read (off macOS)."""
+    if sys.platform != "darwin":
+        return None
+    status = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, check=True)
+    settings = subprocess.run(["pmset", "-g"], capture_output=True, text=True, check=True)
+    return parse_power(status.stdout, settings.stdout)
+
+
 def read_ollama_tree() -> OllamaTree | None:
     listing = subprocess.run(
         ["ps", "-eo", "pid=,ppid=,rss=,args="], capture_output=True, text=True, check=True

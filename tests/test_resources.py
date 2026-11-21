@@ -10,9 +10,11 @@ from pi.resources import (
     OllamaTree,
     ResourceSampler,
     ollama_tree,
+    parse_power,
     parse_process_table,
     parse_swap_used_bytes,
     read_ollama_tree,
+    read_power,
     read_swap_used_bytes,
 )
 
@@ -190,3 +192,51 @@ def test_the_real_swap_reader_works_on_this_machine():
         assert used >= 0
     else:
         assert used is None
+
+
+BATTERY_STATUS = """Now drawing from 'Battery Power'
+ -InternalBattery-0 (id=24182883)	15%; discharging; 0:24 remaining present: true
+"""
+
+MAINS_STATUS = """Now drawing from 'AC Power'
+ -InternalBattery-0 (id=24182883)	100%; charged; 0:00 remaining present: true
+"""
+
+SETTINGS = """System-wide power settings:
+Currently in use:
+ standby              1
+ powermode            2
+ sleep                1
+"""
+
+
+def test_reads_whether_the_machine_is_on_battery_or_mains_and_its_energy_mode():
+    assert parse_power(BATTERY_STATUS, SETTINGS) == {
+        "source": "Battery Power",
+        "mode": "powermode 2",
+    }
+    assert parse_power(MAINS_STATUS, SETTINGS)["source"] == "AC Power"
+
+
+def test_reads_the_energy_mode_under_the_name_older_macs_give_it():
+    settings = "Currently in use:\n lowpowermode         1\n sleep                1\n"
+
+    assert parse_power(MAINS_STATUS, settings)["mode"] == "lowpowermode 1"
+
+
+def test_reports_no_energy_mode_when_the_machine_has_none():
+    assert parse_power(MAINS_STATUS, "Currently in use:\n sleep 1\n")["mode"] is None
+
+
+def test_refuses_a_power_status_it_cannot_read():
+    with pytest.raises(ValueError, match="power"):
+        parse_power("pmset: unavailable", SETTINGS)
+
+
+def test_the_real_power_reader_works_on_this_machine():
+    power = read_power()
+
+    if sys.platform == "darwin":
+        assert power["source"] in ("AC Power", "Battery Power")
+    else:
+        assert power is None

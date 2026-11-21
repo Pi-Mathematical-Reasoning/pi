@@ -1,6 +1,7 @@
 """The report: rebuilt from a run's saved files, with no model involved."""
 
 import json
+from pathlib import Path
 
 from pi.report import build_report
 
@@ -110,6 +111,7 @@ Only `correct` counts as solved.
 | Time per problem | mean 30.0 s, median 25.0 s, longest 60.0 s |
 | Output tokens per problem | mean 200, median 200, most 300 |
 | Speed | mean 20.0 tokens per second |
+| Power | not recorded |
 | Peak memory | 10.0 GiB |
 | Swap growth | none |
 
@@ -203,3 +205,39 @@ def test_a_run_of_one_problem_is_worded_in_the_singular(tmp_path):
     report = build_report(write_run(tmp_path, run=one, results=RESULTS[:1]))
 
     assert "\nA frozen subset of 1 problem.\n" in report
+
+
+def test_says_how_many_problems_ran_on_battery_and_how_many_on_mains(tmp_path):
+    battery = {"source": "Battery Power", "mode": "powermode 1"}
+    mains = {"source": "AC Power", "mode": "powermode 2"}
+    powered = [
+        {**RESULTS[0], "power": battery},
+        {**RESULTS[1], "power": mains},
+        {**RESULTS[2], "power": mains},
+        RESULTS[3],
+    ]
+
+    report = build_report(write_run(tmp_path, results=powered))
+
+    assert (
+        "| Power | Battery Power (powermode 1) for 1 problem, "
+        "AC Power (powermode 2) for 2 problems, not recorded for 1 problem |"
+    ) in report
+
+
+def test_names_the_power_source_alone_when_the_machine_reports_no_energy_mode(tmp_path):
+    mains = {"source": "AC Power", "mode": None}
+
+    report = build_report(write_run(tmp_path, results=[{**r, "power": mains} for r in RESULTS]))
+
+    assert "| Power | AC Power for 4 problems |" in report
+
+
+def test_every_committed_report_is_what_its_saved_files_rebuild():
+    # The brief's done condition: saved predictions regenerate the report with no model.
+    experiments = Path(__file__).parent.parent / "experiments"
+    runs = sorted(path.parent for path in experiments.glob("*/run.json"))
+
+    assert runs, "no committed run to check"
+    for run in runs:
+        assert build_report(run) == (run / "report.md").read_text(), run.name

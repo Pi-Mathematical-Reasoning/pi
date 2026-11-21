@@ -1,6 +1,7 @@
 """The report of a run, rebuilt from its saved files with no model involved."""
 
 import json
+from collections import Counter
 from pathlib import Path
 from statistics import mean, median
 
@@ -142,9 +143,31 @@ def _cost(run: dict, results: list[dict]) -> list[tuple]:
         )
     if speeds:
         rows.append(("Speed", f"mean {mean(speeds):.1f} tokens per second"))
+    rows.append(("Power", _power(results)))
     rows.append(("Peak memory", f"{max(peaks) / 2**30:.1f} GiB" if peaks else "not measured"))
     rows.append(("Swap growth", swap))
     return rows
+
+
+def _power(results: list[dict]) -> str:
+    """How many problems ran on each power source, in the order first seen."""
+    counts = Counter()
+    for result in results:
+        power = result.get("power")  # absent from runs made before it was recorded
+        counts[None if power is None else (power["source"], power.get("mode"))] += 1
+
+    def problems(count: int) -> str:
+        return f"{count} problem" if count == 1 else f"{count} problems"
+
+    parts = [
+        f"{source if mode is None else f'{source} ({mode})'} for {problems(count)}"
+        for (source, mode), count in ((k, c) for k, c in counts.items() if k is not None)
+    ]
+    if not parts:
+        return "not recorded"
+    if counts[None]:
+        parts.append(f"not recorded for {problems(counts[None])}")
+    return ", ".join(parts)
 
 
 def _duration(seconds: float) -> str:

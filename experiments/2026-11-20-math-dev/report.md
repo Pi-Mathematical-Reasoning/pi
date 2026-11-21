@@ -32,6 +32,7 @@ Only `correct` counts as solved.
 | Time per problem | mean 173.8 s, median 147.9 s, longest 457.9 s |
 | Output tokens per problem | mean 3660, median 2602, most 8192 |
 | Speed | mean 21.6 tokens per second |
+| Power | not recorded |
 | Peak memory | 10.8 GiB |
 | Swap growth | none |
 

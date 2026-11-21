@@ -46,7 +46,7 @@ def probe(ollama, config=None, sampler=None, **options):
         sampler or sampler_reading(),
         command=["pi", "probe", "--config", "configs/baseline.toml"],
         code={"revision": "abc123", "dirty": False},
-        **options,
+        **{"read_power": lambda: None, **options},
     )
 
 
@@ -166,6 +166,12 @@ def test_records_peak_memory_and_swap_growth(ollama):
     assert measurements["swap_peak_bytes"] == 50
     assert measurements["swap_growth_bytes"] == 40
     assert measurements["ollama_reported_bytes"] == 9_952_024_329
+
+
+def test_records_what_power_the_machine_was_on(ollama):
+    mains = {"source": "AC Power", "mode": "powermode 2"}
+
+    assert probe(ollama, read_power=lambda: mains)["measurements"]["power"] == mains
 
 
 def test_a_reply_cut_off_at_the_output_limit_did_not_finish(ollama):
