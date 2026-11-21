@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A stand-in for the AWS CLI's `s3api get-object`, for tests.
+"""A stand-in for the AWS CLI's `s3api put-object` and `get-object`, for tests.
 
 Objects live as files under $FAKE_AWS_STORE/<bucket>/<key>. Every call's
 arguments are appended to $FAKE_AWS_STORE/calls.jsonl. $FAKE_AWS_FAIL, when
@@ -20,8 +20,9 @@ with (store / "calls.jsonl").open("a") as calls:
 
 
 def fail(code: str, message: str) -> None:
+    operation = "PutObject" if arguments[1:2] == ["put-object"] else "GetObject"
     print(
-        f"\nAn error occurred ({code}) when calling the GetObject operation: {message}",
+        f"\nAn error occurred ({code}) when calling the {operation} operation: {message}",
         file=sys.stderr,
     )
     sys.exit(254)
@@ -33,10 +34,17 @@ def option(name: str) -> str:
 
 if os.environ.get("FAKE_AWS_FAIL"):
     fail(os.environ["FAKE_AWS_FAIL"], "simulated")
-if arguments[:2] != ["s3api", "get-object"]:
-    sys.exit(f"fake aws: unsupported call {arguments}")
 stored = store / option("--bucket") / option("--key")
-if not stored.exists():
-    fail("NoSuchKey", "The specified key does not exist.")
-shutil.copyfile(stored, arguments[-1])
-print(json.dumps({"ContentLength": stored.stat().st_size}))
+if arguments[:2] == ["s3api", "put-object"]:
+    if option("--if-none-match") == "*" and stored.exists():
+        fail("PreconditionFailed", "At least one of the pre-conditions you specified did not hold")
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(option("--body"), stored)
+    print(json.dumps({"ETag": '"0"'}))
+elif arguments[:2] == ["s3api", "get-object"]:
+    if not stored.exists():
+        fail("NoSuchKey", "The specified key does not exist.")
+    shutil.copyfile(stored, arguments[-1])
+    print(json.dumps({"ContentLength": stored.stat().st_size}))
+else:
+    sys.exit(f"fake aws: unsupported call {arguments}")

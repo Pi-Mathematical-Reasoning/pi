@@ -383,3 +383,69 @@ def test_eval_warns_when_the_mirror_fails_and_the_upstream_serves(ollama, tmp_pa
     assert status == 0
     assert "warning:" in captured.err and "NoSuchKey" in captured.err
     assert f"problem file from {(tmp_path / 'problems.jsonl').as_uri()}" in captured.out
+
+
+def finished_run(ollama, tmp_path):
+    answer_one_of_three(ollama)
+    arguments = eval_arguments(tmp_path, ollama)
+    main(arguments)
+    definition = arguments[arguments.index("--benchmark") + 1]
+    return tmp_path / "run", definition
+
+
+def test_audit_writes_the_report_and_the_audit_and_passes_a_sound_run(ollama, tmp_path, capsys):
+    out, definition = finished_run(ollama, tmp_path)
+    capsys.readouterr()
+
+    status = main(
+        ["audit", str(out), "--benchmark", definition, "--data-dir", str(tmp_path / "data")]
+    )
+
+    printed = capsys.readouterr().out
+    assert status == 0
+    assert (out / "report.md").exists()
+    assert json.loads((out / "audit.json").read_text())["passed"] is True
+    assert "passed: verdicts" in printed
+    assert "audit passed" in printed
+
+
+def test_audit_fails_a_run_whose_records_were_altered(ollama, tmp_path, capsys):
+    out, definition = finished_run(ollama, tmp_path)
+    rows = (out / "results.jsonl").read_text().splitlines()
+    altered = json.loads(rows[1])
+    altered["verdict"] = "correct"
+    rows[1] = json.dumps(altered)
+    (out / "results.jsonl").write_text("\n".join(rows) + "\n")
+    capsys.readouterr()
+
+    status = main(
+        ["audit", str(out), "--benchmark", definition, "--data-dir", str(tmp_path / "data")]
+    )
+
+    printed = capsys.readouterr().out
+    assert status == 1
+    assert "FAILED: verdicts" in printed and "dev/2" in printed
+
+
+def test_publish_uploads_an_audited_run(ollama, tmp_path, capsys, aws):
+    out, definition = finished_run(ollama, tmp_path)
+    main(["audit", str(out), "--benchmark", definition, "--data-dir", str(tmp_path / "data")])
+    capsys.readouterr()
+
+    status = main(["publish", str(out)])
+
+    printed = capsys.readouterr().out
+    assert status == 0
+    assert "_manifest.json: uploaded" in printed
+    manifest = aws / "jaws-pi-prover-artifacts" / "data" / "runs" / "run" / "_manifest.json"
+    assert json.loads(manifest.read_text())["run"] == "run"
+
+
+def test_publish_refuses_a_run_that_was_not_audited(ollama, tmp_path, capsys, aws):
+    out, _ = finished_run(ollama, tmp_path)
+    capsys.readouterr()
+
+    status = main(["publish", str(out)])
+
+    assert status == 1
+    assert "pi audit" in capsys.readouterr().err

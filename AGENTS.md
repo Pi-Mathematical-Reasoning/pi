@@ -60,6 +60,8 @@ the brief, [PI_PROJECT.md](PI_PROJECT.md).
   states them. A change to how answers are found or compared bumps
   `RULES_VERSION` in `src/pi/grading.py` and updates that document. Debug the
   grader on development problems, never on evaluation problems.
+- **Never publish to the artifacts bucket yourself.** `pi publish` uploads with
+  the owner's admin credentials; the owner runs it, or asks you to.
 - **Weights and checkpoints never go in git.** The brief keeps durable
   artifacts in S3, checksummed.
 

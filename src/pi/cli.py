@@ -6,6 +6,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pi.audit import AUDIT, REPORT, audit_run
 from pi.benchmarks import BenchmarkError, fetch_file, load_benchmark, load_problems
 from pi.checkpoint import CheckpointError
 from pi.config import ConfigError, load_config
@@ -13,9 +14,14 @@ from pi.evaluation import RUN, EvaluationError, run_evaluation
 from pi.grading import grade, grader_version
 from pi.ollama import OllamaClient, OllamaError
 from pi.probe import run_probe, summarize
+from pi.publish import PublishError, publish_run, run_bucket
 from pi.report import build_report
 from pi.resources import ResourceSampler
 from pi.revision import code_revision
+from pi.s3 import AwsCli, S3Error
+
+#: The repository's jaws project file, which names the artifacts bucket.
+PROJECT_FILE = Path(__file__).resolve().parents[2] / "jaws.yaml"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,7 +33,44 @@ def main(argv: list[str] | None = None) -> int:
         return _grade(options)
     if options.command == "eval":
         return _eval(options, arguments)
+    if options.command == "audit":
+        return _audit(options)
+    if options.command == "publish":
+        return _publish(options)
     return _report(options)
+
+
+def _audit(options: argparse.Namespace) -> int:
+    out = options.run
+    try:
+        benchmark = load_benchmark(options.benchmark)
+        if not (out / REPORT).exists():
+            (out / REPORT).write_text(build_report(out))
+            print(f"wrote {out / REPORT} from the records")
+        audit = audit_run(out, benchmark, options.data_dir)
+    except (OSError, ValueError, KeyError, BenchmarkError, EvaluationError) as error:
+        return _fail(f"cannot audit {out}: {error}")
+
+    (out / AUDIT).write_text(json.dumps(audit, indent=2) + "\n")
+    for check in audit["checks"]:
+        mark = "passed" if check["passed"] else "FAILED"
+        detail = f" ({check['detail']})" if check["detail"] else ""
+        print(f"{mark}: {check['name']}{detail}")
+    verdict = "audit passed" if audit["passed"] else "audit FAILED"
+    print(f"{verdict}; written to {out / AUDIT}")
+    return 0 if audit["passed"] else 1
+
+
+def _publish(options: argparse.Namespace) -> int:
+    try:
+        bucket, prefix = run_bucket(PROJECT_FILE)
+        outcome = publish_run(options.run, bucket, AwsCli(profile=options.profile), prefix)
+    except (OSError, PublishError, S3Error) as error:
+        return _fail(error)
+    for name, result in outcome.items():
+        print(f"{name}: {result}")
+    print(f"published to s3://{bucket}/{prefix}{options.run.name}/")
+    return 0
 
 
 def _probe(options: argparse.Namespace, arguments: list[str]) -> int:
@@ -179,6 +222,27 @@ def _parser() -> argparse.ArgumentParser:
         default=Path("data"),
         help="where fetched problem files are kept (default: data)",
     )
+
+    audit = commands.add_parser(
+        "audit",
+        help="check a finished run from its saved files and write audit.json, without the model",
+    )
+    audit.add_argument("run", type=Path, help="the run directory")
+    audit.add_argument(
+        "--benchmark", required=True, type=Path, help="the benchmark definition it was run on"
+    )
+    audit.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="where fetched problem files are kept (default: data)",
+    )
+
+    publish = commands.add_parser(
+        "publish", help="upload an audited run to Pi's artifacts bucket, manifest last"
+    )
+    publish.add_argument("run", type=Path, help="the run directory, audited")
+    publish.add_argument("--profile", help="the AWS CLI profile (default: AWS_PROFILE)")
 
     report = commands.add_parser(
         "report", help="rebuild the report of a saved run, without the model"
