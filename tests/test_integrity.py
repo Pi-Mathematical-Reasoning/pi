@@ -252,3 +252,15 @@ def test_an_unscored_session_skips_the_weights_check(ollama, tmp_path):
     run = evaluate(ollama, tmp_path / "run", verify_weights=verify)
 
     assert run["sessions"][0]["weights_verified"] is None
+
+
+def test_the_run_file_counts_each_result_as_it_is_saved(ollama, tmp_path):
+    # So a session killed outright still says how many problems it attempted.
+    counts = []
+
+    def report(line):
+        counts.append(run_file(tmp_path / "run")["sessions"][0]["attempted"])
+
+    evaluate(ollama, tmp_path / "run", report=report)
+
+    assert counts == [1, 2, 3]

@@ -147,6 +147,8 @@ def run_evaluation(
                 os.fsync(results_file.fileno())
                 done.add(problem.id)
                 session["attempted"] += 1
+                # Kept current, so a session stopped outright still has its count.
+                _write(out / RUN, run)
                 report(_progress(len(done), len(problems), result))
     finally:
         session["ended_at"] = _now()
