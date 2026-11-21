@@ -140,6 +140,28 @@ Every run, scored or not, also keeps:
   made again, because its time measured the sleep. A fresh load makes the new
   attempt write the same reply.
 
+### After a run: audit, then publish
+
+```sh
+uv run pi audit runs/<run> --benchmark benchmarks/<benchmark>.toml
+uv run pi publish runs/<run>
+```
+
+`pi audit` checks a finished run from its saved files alone, with no model. It
+fetches the problem file and checks its checksum. It checks that each problem
+has exactly one result, grades every saved reply again under the same grader,
+and checks each result belongs to a recorded session. It also rebuilds the
+report, and for a scored run checks the scored standard held throughout. It
+writes `report.md` if missing and `audit.json`, which records every check and
+the SHA-256 of each file it audited.
+
+`pi publish` uploads an audited run to Pi's artifacts bucket under
+`data/runs/<run>/`, then writes `_manifest.json` last, as Jaws lays out run
+artifacts. It refuses a run whose audit failed or whose files changed since
+the audit. It never overwrites: it reads each file back and checks it, and
+publishing again changes nothing. It needs AWS credentials, as the mirror
+does.
+
 A problem takes two to three minutes on average and up to ten, so the 30
 development problems take about an hour and a half. On a Mac, run on mains
 power: this checkpoint generates a third slower on battery. Start a long run
