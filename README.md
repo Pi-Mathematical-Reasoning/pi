@@ -18,21 +18,53 @@ The full brief, with each milestone and its done condition, is
 
 ## Status
 
-**Nothing runs yet.** The repository holds the brief and an empty Python
-package. The first deliverable is a reproducible score for the original
-checkpoint; training comes after that measurement.
+**One thing runs so far: the checkpoint probe.** It loads the pinned
+checkpoint, gives it one problem and records how fast it went and what it cost
+the machine. Nothing is graded yet. The first deliverable is a reproducible
+score for the original checkpoint; training comes after that measurement.
 
 | Stage | What it measures | State |
 | --- | --- | --- |
-| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | Not started |
+| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | In progress: the checkpoint is pinned and probed; grading and the scored run are next |
 | Milestone 2: proof writing | Fraction of a pinned miniF2F subset proved, graded by Lean 4 | Not started |
 | Later experiments | Lean-guided revision, fine-tuning on AWS, a larger-model comparison | Not started |
+
+Measurements are in the [experiment log](experiments/README.md).
+
+## Run the checkpoint probe
+
+The probe needs [Ollama](https://ollama.com) running with the pinned model:
+
+```sh
+ollama pull qwen3:14b
+uv run pi probe --config configs/qwen3-14b.toml
+```
+
+It refuses to run unless the installed model's digest matches the one pinned
+in the configuration. Then it unloads the model, so every run starts from a
+fresh load, sends the model one problem, prints the measurements and writes a
+JSON record under `runs/`. The fresh load is what makes a run repeatable: with
+the same seed, a model that already holds the prompt in its cache writes
+different text. The record holds:
+
+- **The checkpoint:** the Ollama digest, the hash of the weights file, the
+  quantization and the tokenizer settings.
+- **The runtime:** the Ollama version and the command it launched the model
+  with.
+- **The run:** the configuration, the command line and the git revision.
+- **The result:** the reply with its reasoning, the token counts, tokens per
+  second, elapsed time, peak memory and swap growth.
+
+Memory is measured over the Ollama server and the processes it launches, and
+swap growth is measured on macOS only.
 
 ## Layout
 
 ```text
 PI_PROJECT.md    the project brief
-src/pi/          the Python package, empty so far
+configs/         run configurations: a pinned checkpoint and its generation settings
+experiments/     the experiment log, and the record of each run it cites
+src/pi/          the Python package
 tests/           tests, run with pytest
 scripts/         the local check suite and the repository settings
 tools/           the commit message rule
