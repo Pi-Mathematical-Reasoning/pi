@@ -8,6 +8,10 @@ name = "math-dev"
 url = "https://huggingface.co/datasets/nlile/hendrycks-MATH-benchmark/resolve/465bcdb36f5962aa3512891498966df785fc3c18/data/train-00000-of-00001.parquet"
 sha256 = "5bb914caa970c120a9a139ccedef764da11e62965ac31f4dfff3ccf774199375"
 format = "parquet"
+# The same file in Pi's own bucket (Pi-Mathematical-Reasoning/pi-benchmarks),
+# where it is named math-train-12k for what it holds. Tried first; it needs
+# AWS credentials: `aws sso login --profile jaws-prod`.
+mirror = "s3://jaws-pi-benchmarks-problems/data/math-train-12k/5bb914caa970c120a9a139ccedef764da11e62965ac31f4dfff3ccf774199375/train-00000-of-00001.parquet"
 ids = [
     "train/prealgebra/146.json",
     "train/prealgebra/513.json",

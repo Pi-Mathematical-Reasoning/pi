@@ -74,6 +74,7 @@ def evaluate(ollama, out, **options):
         "code": {"revision": "abc123", "dirty": False},
         "report": lambda line: None,
         "read_power": lambda: None,
+        "problem_file": "https://example.com/problems.jsonl",
     }
     settings.update(options)
     return run_evaluation(client=OllamaClient(ollama.host), out=out, **settings)
@@ -184,6 +185,7 @@ def test_a_finished_run_is_marked_complete_and_says_what_it_ran(ollama, tmp_path
     assert run["grader"]["rules"] == 1
     assert [session["attempted"] for session in run["sessions"]] == [3]
     assert run["sessions"][0]["command"] == ["pi", "eval"]
+    assert run["sessions"][0]["problem_file"] == "https://example.com/problems.jsonl"
     assert run["sessions"][0]["code"] == {"revision": "abc123", "dirty": False}
 
 

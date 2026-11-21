@@ -5,3 +5,6 @@ name = "math-500"
 url = "https://huggingface.co/datasets/HuggingFaceH4/MATH-500/resolve/6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be/test.jsonl"
 sha256 = "35dc41080a3680858b27fa7e0533d2d547825316fc5dafe5d316f4ccc5a06132"
 format = "jsonl"
+# The same file in Pi's own bucket (Pi-Mathematical-Reasoning/pi-benchmarks),
+# tried first. It needs AWS credentials: `aws sso login --profile jaws-prod`.
+mirror = "s3://jaws-pi-benchmarks-problems/data/math-500/35dc41080a3680858b27fa7e0533d2d547825316fc5dafe5d316f4ccc5a06132/test.jsonl"
