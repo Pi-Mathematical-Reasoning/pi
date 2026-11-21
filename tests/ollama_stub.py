@@ -121,6 +121,9 @@ class OllamaStub:
         self.unload_lag = 0
         self._lag_left = None
         self.chat_error = None  # (status, message) to answer /api/chat with
+        # What to answer for one problem in particular. Keyed by the problem
+        # text; a value may set "content", "done_reason", "delay" and "error".
+        self.replies = {}
         self.requests = []  # (method, path, body or None)
         self._stopping = threading.Event()
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
@@ -192,12 +195,19 @@ class OllamaStub:
                     )
                 elif self.path == "/api/chat":
                     stub.loaded, stub._lag_left = True, None
-                    stub._stopping.wait(stub.chat_delay)
-                    if stub.chat_error:
-                        status, message = stub.chat_error
+                    special = stub.replies.get(body["messages"][-1]["content"], {})
+                    stub._stopping.wait(special.get("delay", stub.chat_delay))
+                    error = special.get("error", stub.chat_error)
+                    if error:
+                        status, message = error
                         self._answer(status, {"error": message})
-                    else:
-                        self._answer(200, stub.chat)
+                        return
+                    reply = json.loads(json.dumps(stub.chat))
+                    if "content" in special:
+                        reply["message"]["content"] = special["content"]
+                    if "done_reason" in special:
+                        reply["done_reason"] = special["done_reason"]
+                    self._answer(200, reply)
 
             def _answer(self, status, payload):
                 data = json.dumps(payload).encode()

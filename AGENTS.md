@@ -49,6 +49,10 @@ the brief, [PI_PROJECT.md](PI_PROJECT.md).
   model or downloading a dataset.
 - **Evaluation problems stay out of training data**, along with their
   solutions and close variants.
+- **Benchmark problem files are never committed.** A definition in
+  `benchmarks/` pins a URL and a checksum, and `pi` fetches the file into the
+  ignored `data/` directory. Use `benchmarks/math-dev.toml` for development;
+  `benchmarks/math-500.toml` is for the scored run only.
 - **Scored runs follow rules fixed in advance.** The prompt, sampling
   settings, limits and grader are frozen before a scored run and tuned only on
   development problems. A malformed answer or a timeout counts as unsolved.

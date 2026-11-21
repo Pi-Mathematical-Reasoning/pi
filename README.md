@@ -73,16 +73,48 @@ and compares it with the reference as mathematics, so `0.5` matches
 examples of what does and does not count, are in
 [docs/grading.md](docs/grading.md). Grading needs no model.
 
+## Run a benchmark
+
+```sh
+uv run pi eval --config configs/qwen3-14b.toml --benchmark benchmarks/math-dev.toml --out runs/dev
+uv run pi report runs/dev
+```
+
+`pi eval` attempts every problem once, from a fresh load of the model, and
+sends it only the problem text. Each result is saved as it finishes. If the
+run stops for any reason, the same command resumes it at the first problem
+with no result. It refuses to continue if the checkpoint, the settings, the
+problems or the grader have changed since the run began.
+
+A run directory holds two files. `run.json` says what was run and whether it
+is complete. `results.jsonl` has one line per problem: the reply, the final
+answer read from it, the verdict, the token counts and the time. `pi report`
+rebuilds the score from those two files alone, so it needs no model.
+
+| Benchmark | Problems | Use |
+| --- | --- | --- |
+| `benchmarks/math-dev.toml` | A frozen sample of 30 MATH training problems | Tuning the limits and debugging the grader |
+| `benchmarks/math-500.toml` | The 500 problems of MATH-500 | The scored baseline, and never tuning |
+
+The problem file is fetched on first use into `data/` and checked against the
+checksum pinned in the benchmark definition. Problem files are never
+committed.
+
+A problem takes about two minutes, so the 30 development problems take about
+an hour. On a Mac, start a long run with `caffeinate -i` in front of the
+command so the machine does not sleep part way.
+
 ## Layout
 
 ```text
 PI_PROJECT.md    the project brief
+benchmarks/      benchmark definitions: a pinned problem file, or a frozen subset of one
 configs/         run configurations: a pinned checkpoint and its generation settings
 docs/            the grading rules
 experiments/     the experiment log, and the record of each run it cites
 src/pi/          the Python package
 tests/           tests, run with pytest
-scripts/         the local check suite and the repository settings
+scripts/         the local check suite, the repository settings and the choice of development problems
 tools/           the commit message rule
 ```
 

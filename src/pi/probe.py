@@ -5,19 +5,14 @@ and runtime ran, and whether a problem finishes at a practical speed on this
 machine. Nothing is graded here.
 """
 
-import re
 import time
 from dataclasses import asdict
 from datetime import UTC, datetime
-from pathlib import Path
 
+from pi.checkpoint import inspect_checkpoint
 from pi.config import Config
 from pi.ollama import OllamaClient, OllamaTimeout
-from pi.resources import ResourceSampler
-
-
-class ProbeError(Exception):
-    """The probe cannot run as configured."""
+from pi.resources import ResourceSampler, without_home
 
 
 def run_probe(
@@ -30,17 +25,7 @@ def run_probe(
     clock=time.monotonic,
 ) -> dict:
     name = config.model.name
-    version = client.version()
-
-    installed = client.installed_digest(name)
-    if installed is None:
-        raise ProbeError(f"{name} is not installed; run `ollama pull {name}`")
-    if installed != config.model.digest:
-        raise ProbeError(
-            f"the installed {name} has digest {installed}, "
-            f"but the configuration pins {config.model.digest}"
-        )
-    description = client.describe(name)
+    checkpoint = inspect_checkpoint(config, client)
 
     # Start from a fresh load: the same seed gives different text when the
     # prompt is already in the model's cache.
@@ -67,20 +52,10 @@ def run_probe(
         "code": code,
         "config": asdict(config),
         "runtime": {
-            "name": "ollama",
-            "version": version,
-            "runner_commands": [_without_home(c) for c in sampler.runner_commands],
+            **checkpoint["runtime"],
+            "runner_commands": [without_home(c) for c in sampler.runner_commands],
         },
-        "model": {
-            "name": name,
-            "digest": installed,
-            "weights": _weights(description.get("modelfile", "")),
-            "format": description["details"]["format"],
-            "parameter_size": description["details"]["parameter_size"],
-            "quantization": description["details"]["quantization_level"],
-            "default_parameters": description.get("parameters", ""),
-            "tokenizer": _tokenizer(description.get("model_info", {})),
-        },
+        "model": checkpoint["model"],
         "response": None
         if reply is None
         else {
@@ -144,25 +119,3 @@ def _or_missing(value, missing: str) -> str:
 
 def _gib(size: int | None, places: int) -> str:
     return "not measured" if size is None else f"{size / 2**30:.{places}f} GiB"
-
-
-_BLOB = re.compile(r"^FROM .*?(sha256-[0-9a-f]{64})\s*$", re.MULTILINE)
-
-
-def _weights(modelfile: str) -> str | None:
-    """The content hash of the weights file the model was built from."""
-    match = _BLOB.search(modelfile)
-    return match.group(1) if match else None
-
-
-def _tokenizer(model_info: dict) -> dict:
-    """The tokenizer settings, without the vocabulary arrays Ollama leaves empty."""
-    return {
-        key: value
-        for key, value in model_info.items()
-        if key.startswith("tokenizer.") and value != []
-    }
-
-
-def _without_home(command: str) -> str:
-    return command.replace(str(Path.home()), "~")

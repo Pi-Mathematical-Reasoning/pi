@@ -10,6 +10,9 @@ dist/
 # Records of local runs that have not been chosen for the experiment log
 runs/
 
+# Benchmark problem files, fetched and checked against their pinned checksums
+data/
+
 # Node (commit-message tooling)
 node_modules/
 

@@ -1,0 +1,42 @@
+# The development problems: a frozen sample of 30 MATH training problems, for
+# tuning limits and debugging the grader without touching MATH-500.
+#
+# The source is the training split that PRM800K pairs with MATH-500. None of
+# its problems is in MATH-500. scripts/select_dev_problems.py chose the ids,
+# from MATH's own training problems, in the proportions of MATH-500's levels.
+name = "math-dev"
+url = "https://huggingface.co/datasets/nlile/hendrycks-MATH-benchmark/resolve/465bcdb36f5962aa3512891498966df785fc3c18/data/train-00000-of-00001.parquet"
+sha256 = "5bb914caa970c120a9a139ccedef764da11e62965ac31f4dfff3ccf774199375"
+format = "parquet"
+ids = [
+    "train/prealgebra/146.json",
+    "train/prealgebra/513.json",
+    "train/precalculus/348.json",
+    "train/algebra/268.json",
+    "train/algebra/57.json",
+    "train/counting_and_probability/752.json",
+    "train/intermediate_algebra/1563.json",
+    "train/number_theory/976.json",
+    "train/algebra/2769.json",
+    "train/algebra/309.json",
+    "train/counting_and_probability/345.json",
+    "train/geometry/560.json",
+    "train/intermediate_algebra/290.json",
+    "train/intermediate_algebra/772.json",
+    "train/algebra/2289.json",
+    "train/algebra/574.json",
+    "train/geometry/294.json",
+    "train/geometry/650.json",
+    "train/intermediate_algebra/1052.json",
+    "train/number_theory/1293.json",
+    "train/number_theory/564.json",
+    "train/prealgebra/1731.json",
+    "train/algebra/235.json",
+    "train/counting_and_probability/265.json",
+    "train/intermediate_algebra/1427.json",
+    "train/intermediate_algebra/1720.json",
+    "train/intermediate_algebra/335.json",
+    "train/intermediate_algebra/895.json",
+    "train/intermediate_algebra/940.json",
+    "train/number_theory/270.json",
+]
