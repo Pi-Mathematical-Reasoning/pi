@@ -236,3 +236,86 @@ there was no swap. Kept from the run, in
   below 14 tokens per second, and this Mac ran at 18.4 on battery.
 - **It is still a limit.** The harder of the two problems used 82% of it. A
   problem that needs more than 16,384 tokens is unsolved by rule.
+
+## 2026-11-21: MATH-500 baseline, pre-registered
+
+**Status: registered, not yet run.** This entry fixes everything about the
+scored run before it starts. The pull request that adds it is merged before the
+first attempt, so the git history shows the rules came before the results.
+Nothing below changes once the run starts. If something must change, the run is
+abandoned, its records are kept, and a new run starts in a new directory under
+a new entry.
+
+**Question.** What fraction of the 500 MATH-500 problems does the original
+Qwen3-14B checkpoint answer correctly, with one attempt each, on this Mac?
+
+**Fixed in advance.**
+
+| | |
+| --- | --- |
+| Problems | All 500 of MATH-500 (`benchmarks/math-500.toml`), file SHA-256 `35dc41080a36`. Not a subset |
+| Score | Problems whose verdict is `correct`, divided by 500 |
+| Checkpoint | `qwen3:14b` on Ollama 0.40.13, digest `bdbd181c33f2`, weights `sha256-a8cc1361f314` |
+| Settings | `configs/qwen3-14b.toml`: reasoning on, temperature 0.6, top-p 0.95, top-k 20, seed 1, 24,576-token context, 16,384-token output limit, 1,200 s time limit |
+| Prompt | The problem text alone, as the only user message |
+| Grader | Rules version 1 ([docs/grading.md](../docs/grading.md)), math-verify 0.9.0 |
+| Unsolved | `incorrect`, `missing`, `cut_off` and `timed_out` all count as unsolved |
+
+**How it is run.**
+
+- From a clean checkout of a commit that contains this entry, on mains power,
+  with the lid open:
+
+  ```sh
+  caffeinate -i uv run pi eval --config configs/qwen3-14b.toml \
+    --benchmark benchmarks/math-500.toml --out runs/2026-11-21-math-500
+  ```
+
+- The records are written under the git-ignored `runs/`. A scored run refuses
+  uncommitted changes, and records written into the repository would count as
+  one. They are copied into `experiments/` when the run is complete.
+- `pi eval` enforces the rest: verified weights at each session, mains power
+  at each attempt, a fixed runner launch, and no attempt the Mac slept through.
+  Each session is on record from its start. An interruption is resumed with
+  the same command.
+
+**After the run, in this order.**
+
+1. **Audit** the records with `pi audit`. It checks the problem file's
+   checksum, that each problem has exactly one result, and each verdict
+   against the saved reply under the same grader. It also checks the report
+   rebuilds from the records, then writes a SHA-256 manifest of the files.
+2. **Reproduce** five problems chosen in advance with seed 20261121, each from
+   a fresh load, and compare the replies with the recorded ones:
+   `test/algebra/305.json`, `test/counting_and_probability/25149.json`,
+   `test/geometry/456.json`, `test/intermediate_algebra/232.json` and
+   `test/precalculus/675.json`.
+3. **Publish** the audited records to `jaws-pi-prover-artifacts` with
+   `pi publish`, under `data/runs/2026-11-21-math-500/`, with `_manifest.json`
+   written last.
+4. **Commit** the records, the audit and the report to this repository, with
+   the result in a new entry below this one.
+
+**Pre-flight, done before this entry was merged.** A scored run of two
+development problems, never MATH-500, from a fresh clone of `pi`:
+
+- On battery, it stopped before its first attempt and said how to resume.
+- On mains, it was killed with `SIGKILL` after its first result and resumed.
+  The result survived, the killed session stayed on record, and the run
+  completed, 2 of 2 correct. The S3 mirror served the problem file, and the
+  weights file verified in each session.
+- `pi audit` passed it, and failed a copy with one altered answer.
+- It found one bug: the report assumed every session had ended cleanly, so a
+  killed session crashed it. It was fixed in pi#19 before this entry.
+- The run is published to `jaws-pi-prover-artifacts` as
+  `data/runs/2026-11-21-preflight/`, the first use of `pi publish`.
+
+**Expected cost.** About 17 to 20 hours of the Mac on mains, from the
+development run's mean of 3,660 output tokens at 27 tokens per second, plus
+about 5% for the higher output limit. Peak memory about 11.5 GiB. No cloud
+compute.
+
+**What would be surprising.** The 30 development problems scored 28 of 30, and
+an inferred 30 of 30 under these limits. Those problems come from MATH's
+training split, which the checkpoint may have seen in pretraining. A MATH-500
+score well below that would be an honest baseline, not a sign of a fault.
