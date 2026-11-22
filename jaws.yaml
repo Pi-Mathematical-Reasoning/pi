@@ -13,9 +13,9 @@ project: pi-prover
 repository: Pi-Mathematical-Reasoning/pi
 
 # The tags every resource carries (through the provider's default_tags).
-# Project, Repository and Environment=prod are cross-checked.
+# Project, Repository and Environment=prod are cross-checked; jaws adds
+# Organization (this repository's GitHub owner) and ManagedBy itself.
 tags:
-  Organization: jaws
   Project: pi-prover
   Environment: prod
   Repository: Pi-Mathematical-Reasoning/pi
@@ -24,7 +24,7 @@ tags:
 components:
   - kind: dataset
     name: artifacts
-    bucket: jaws-pi-prover-artifacts  # <Organization>-<project>-<name>
+    bucket: jaws-pi-prover-artifacts  # <name_root>-<project>-<name>
     prefix: data/
     # Run records are kept forever, and an overwritten or deleted object stays
     # recoverable. Each run lives under data/runs/<run>/, and its
