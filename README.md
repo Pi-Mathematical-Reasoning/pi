@@ -1,5 +1,8 @@
+[![Pi: irrationally good at math](https://raw.githubusercontent.com/Pi-Mathematical-Reasoning/pi-branding/main/assets/banner/pi-readme-banner.png)](https://github.com/Pi-Mathematical-Reasoning)
+
 # Pi
 
+[![GitHub release](https://img.shields.io/github/v/release/Pi-Mathematical-Reasoning/pi?label=release)](https://github.com/Pi-Mathematical-Reasoning/pi/releases/latest)
 [![CI](https://github.com/Pi-Mathematical-Reasoning/pi/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/Pi-Mathematical-Reasoning/pi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Pi-Mathematical-Reasoning/pi/blob/main/LICENSE)
 
