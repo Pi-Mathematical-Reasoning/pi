@@ -263,3 +263,57 @@ def test_an_interrupted_lean_run_s_report_says_it_is_incomplete(ollama, tmp_path
 
 def test_the_task_sends_the_prompt_built_from_its_instruction(tmp_path):
     assert task_for(tmp_path, FakeRunner()).prompt(ONE) == lean_prompt(INSTRUCTION, ONE)
+
+
+def slept_once():
+    wakes = iter(["06:00", "07:00", "07:00", "07:00"])
+    return lambda: next(wakes)
+
+
+def test_a_proof_file_of_a_discarded_attempt_does_not_outlive_a_failed_redo(ollama, tmp_path):
+    out = tmp_path / "run"
+    runner = FakeRunner(
+        compiles=[OK, OK, OK, Finished(1, "", "", 3.0)],
+        judges=[JUDGED],
+        saved=[outcome(ONE.id)],
+    )
+
+    run_lean(ollama, out, runner, problems=[ONE], read_wake=slept_once())
+
+    (result,) = read_results(out)
+    assert result["verdict"] == "failed"
+    assert not (out / "proofs" / "fixture_add_zero.lean").exists()
+
+
+def test_a_proof_file_of_a_discarded_attempt_does_not_outlive_a_cut_off_redo(ollama, tmp_path):
+    out = tmp_path / "run"
+
+    def cut_off_from_now_on(line):
+        ollama.replies[lean_prompt(INSTRUCTION, ONE)]["done_reason"] = "length"
+
+    run_lean(
+        ollama,
+        out,
+        proving_runner(ONE.id),
+        problems=[ONE],
+        read_wake=slept_once(),
+        report=cut_off_from_now_on,
+    )
+
+    (result,) = read_results(out)
+    assert result["verdict"] == "cut_off"
+    assert not (out / "proofs" / "fixture_add_zero.lean").exists()
+
+
+def test_a_proof_file_left_by_an_earlier_session_is_gone_when_the_attempt_is_not_proved(
+    ollama, tmp_path
+):
+    out = tmp_path / "run"
+    (out / "proofs").mkdir(parents=True)
+    (out / "proofs" / "fixture_third.lean").write_text("stale", encoding="utf-8")
+    (out / "proofs" / "fixture_add_zero.lean").write_text("stale", encoding="utf-8")
+
+    run_lean(ollama, out, proving_runner(ONE.id), problems=[ONE, THREE])
+
+    assert [p.name for p in (out / "proofs").iterdir()] == ["fixture_add_zero.lean"]
+    assert "stale" not in (out / "proofs" / "fixture_add_zero.lean").read_text(encoding="utf-8")

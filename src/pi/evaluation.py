@@ -76,6 +76,9 @@ class AnswerTask:
                 f"problem(s): {shown}"
             )
 
+    def begin(self, problem: Problem) -> None:
+        """Called first in every attempt; an answer run keeps nothing outside its records."""
+
     def prompt(self, problem: Problem) -> str:
         return problem.problem
 
@@ -307,6 +310,7 @@ def _attempt(
     sampler: ResourceSampler | None = None,
     read_thermal=lambda: None,
 ) -> dict:
+    task.begin(problem)
     name = config.model.name
     # Battery or mains: the machine generates markedly slower on battery.
     power = read_power()

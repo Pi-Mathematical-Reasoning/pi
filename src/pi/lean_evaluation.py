@@ -65,6 +65,10 @@ class LeanTask:
         """Nothing to verify in advance: the statements are the benchmark's own."""
         return None
 
+    def begin(self, theorem: Theorem) -> None:
+        """Remove the proof file of an earlier attempt, so only the one on record can remain."""
+        (self.out / PROOFS / f"{theorem.id}.lean").unlink(missing_ok=True)
+
     def prompt(self, theorem: Theorem) -> str:
         return lean_prompt(self.settings.instruction, theorem)
 

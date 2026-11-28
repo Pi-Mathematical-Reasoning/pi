@@ -365,3 +365,22 @@ def test_a_run_records_and_compares_every_identity_key_of_its_task(ollama, tmp_p
     assert json.loads((tmp_path / "run" / "run.json").read_text())["loud"] is True
     with pytest.raises(EvaluationError, match="different loud"):
         evaluate(ollama, tmp_path / "run", problems=[ONE], task=Quiet())
+
+
+def test_a_task_is_told_to_begin_each_attempt_before_the_model_is_contacted(ollama, tmp_path):
+    began = []
+
+    class Beginning(Shouting):
+        def begin(self, problem):
+            began.append((problem.id, len(ollama.requests)))
+
+    ollama.replies = {p.problem.upper(): {"content": "hello"} for p in PROBLEMS}
+
+    evaluate(ollama, tmp_path / "run", task=Beginning())
+
+    assert [id for id, _ in began] == ["dev/1", "dev/2", "dev/3"]
+    # Each began before anything of its own attempt reached the server (unload, then chat).
+    contacted = [count for _, count in began]
+    assert contacted == sorted(set(contacted)) and len(ollama.requests_to("/api/chat")) == 3
+    first_chat = next(i for i, r in enumerate(ollama.requests) if r[1] == "/api/chat")
+    assert contacted[0] < first_chat
