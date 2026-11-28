@@ -1,0 +1,14 @@
+Currently running on Lean v4.27.0
+Running SafeVerify on target file: ../work/renamed_binders/Target.olean and submission file: ../work/renamed_binders/Submission.olean.
+------------------
+Replaying ../work/renamed_binders/Target.olean
+Finished setting up the environment.
+Finished replay. Found 1 declarations.
+------------------
+Replaying ../work/renamed_binders/Submission.olean
+Finished setting up the environment.
+Finished replay. Found 1 declarations.
+------------------
+------------------
+------------------
+SafeVerify check passed.

@@ -1,0 +1,1 @@
+{"caption":"","data":"declaration uses 'sorry'","endPos":{"column":15,"line":6},"fileName":"../work/unused_sorry/Submission.lean","isSilent":false,"keepFullRange":false,"kind":"hasSorry","pos":{"column":6,"line":6},"severity":"warning"}

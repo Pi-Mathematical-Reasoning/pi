@@ -1,0 +1,2 @@
+{"caption":"","data":"Finished.\n","endPos":{"column":5,"line":3},"fileName":"../work/fake_success_exit/Submission.lean","isSilent":false,"keepFullRange":false,"kind":"[anonymous]","pos":{"column":0,"line":3},"severity":"information"}
+{"caption":"","data":"using 'exit' to interrupt Lean","endPos":{"column":5,"line":5},"fileName":"../work/fake_success_exit/Submission.lean","isSilent":false,"keepFullRange":false,"kind":"[anonymous]","pos":{"column":0,"line":5},"severity":"warning"}

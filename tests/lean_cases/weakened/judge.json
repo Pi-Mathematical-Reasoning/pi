@@ -1,0 +1,5 @@
+[["pi_case",
+  {"targetInfo": {"constInfo": {"kind": "theorem"}, "axioms": ["sorryAx"]},
+   "solutionInfo":
+   {"constInfo": {"kind": "theorem"}, "axioms": ["propext", "Quot.sound"]},
+   "failureMode": "thmType"}]]

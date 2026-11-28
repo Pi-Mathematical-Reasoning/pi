@@ -1,0 +1,4 @@
+[["pi_case",
+  {"targetInfo": {"constInfo": {"kind": "theorem"}, "axioms": ["sorryAx"]},
+   "solutionInfo": null,
+   "failureMode": "notFound"}]]
