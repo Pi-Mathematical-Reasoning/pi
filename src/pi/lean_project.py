@@ -6,11 +6,16 @@ never committed. A checkout that is at another commit or has changes is refused,
 so what was graded is what the definition names.
 """
 
+import contextlib
 import hashlib
+import os
 import re
+import secrets
 import shutil
+import signal
 import subprocess
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -213,3 +218,99 @@ def setup(
         report(f"{benchmark.name}: {len(theorems)} theorems")
     else:
         report(f"{benchmark.name}: {len(theorems)} of {benchmark.theorems} theorems")
+
+
+# Running Lean and the judge: each in a fresh process, under a wall-clock limit.
+
+
+@dataclass(frozen=True)
+class Finished:
+    exit_code: int | None  # None: killed at the limit
+    stdout: str
+    stderr: str
+    seconds: float
+
+
+def run_process(command: list[str], cwd: Path, limit: float) -> Finished:
+    """Run a command; at `limit` seconds kill it and everything it started."""
+    started = time.monotonic()
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        raise BenchmarkError(
+            f"cannot run {' '.join(command)}: {command[0]} was not found"
+        ) from None
+    exit_code: int | None
+    try:
+        stdout, stderr = process.communicate(timeout=limit)
+        exit_code = process.returncode
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        stdout, stderr = process.communicate()
+        exit_code = None
+    return Finished(
+        exit_code=exit_code,
+        stdout=stdout.decode("utf-8", errors="replace"),
+        stderr=stderr.decode("utf-8", errors="replace"),
+        seconds=time.monotonic() - started,
+    )
+
+
+class LeanRunner:
+    """Builds the Lean and judge command lines; every path is relative to the checkout."""
+
+    def __init__(
+        self,
+        benchmark: LeanBenchmark,
+        data_dir: Path,
+        run_process: Callable[[list[str], Path, float], Finished] = run_process,
+    ):
+        self.benchmark = benchmark
+        self.data_dir = Path(data_dir)
+        self.run_process = run_process
+        self.checkout = checkout_dir(data_dir, benchmark.repository, benchmark.commit)
+        self.judge_binary = (
+            checkout_dir(data_dir, benchmark.judge_repository, benchmark.judge_commit)
+            / JUDGE_BINARY
+        )
+
+    @contextlib.contextmanager
+    def work_dir(self) -> Iterator[Path]:
+        """A fresh directory under `<data dir>/lean/work/`, removed on exit."""
+        parent = self.data_dir / "lean" / "work"
+        parent.mkdir(parents=True, exist_ok=True)
+        path = parent / secrets.token_hex(8)
+        path.mkdir()
+        try:
+            yield path
+        finally:
+            shutil.rmtree(path, ignore_errors=True)
+
+    def compile(self, source: Path, olean: Path, limit: float) -> Finished:
+        options = [part for option in self.benchmark.lean_options for part in ("-D", option)]
+        command = [
+            "lake", "env", "lean", "--json", *options,
+            f"--root={self._relative(Path(source).parent)}",
+            "-o", self._relative(olean),
+            self._relative(source),
+        ]  # fmt: skip
+        return self.run_process(command, self.checkout, limit)
+
+    def judge(self, reference: Path, submission: Path, saved: Path, limit: float) -> Finished:
+        command = [
+            "lake", "env", self._relative(self.judge_binary),
+            "--save", self._relative(saved),
+            self._relative(reference), self._relative(submission),
+        ]  # fmt: skip
+        return self.run_process(command, self.checkout, limit)
+
+    def _relative(self, path: Path) -> str:
+        return os.path.relpath(path, self.checkout)

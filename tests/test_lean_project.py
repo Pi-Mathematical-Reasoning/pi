@@ -1,19 +1,26 @@
 """Lean benchmarks: a definition pinned by commit, its checkout, its environment and setup."""
 
+import contextlib
 import hashlib
+import os
 import shutil
+import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from pi.benchmarks import Benchmark, BenchmarkError, load_benchmark
 from pi.lean_project import (
+    Finished,
     LeanBenchmark,
+    LeanRunner,
     ensure_checkout,
     lean_environment,
     load_lean_benchmark,
     load_theorems,
+    run_process,
     setup,
 )
 
@@ -313,3 +320,106 @@ def test_a_failing_build_carries_the_command_and_the_end_of_its_output(tmp_path)
 
     with pytest.raises(BenchmarkError, match=r"(?s)lake exe cache get.*boom: the real reason"):
         setup(benchmark, tmp_path / "data", report=lambda line: None, run=failing)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_a_process_past_its_limit_is_killed_with_everything_it_started(tmp_path):
+    script = tmp_path / "start.sh"
+    script.write_text("sleep 60 &\necho $! > pid\nsleep 60\n")
+    try:
+        done = run_process(["sh", str(script)], tmp_path, limit=1)
+        pid = int((tmp_path / "pid").read_text())
+        assert done.exit_code is None and 1 <= done.seconds < 5
+        assert not _alive(pid)
+    finally:  # leave no stray sleep behind if the assertions fail
+        if (tmp_path / "pid").exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int((tmp_path / "pid").read_text()), signal.SIGKILL)
+
+
+def test_output_is_read_as_utf8_whatever_the_locale(tmp_path, monkeypatch):
+    monkeypatch.setenv("LC_ALL", "C")
+    code = "import sys; sys.stdout.buffer.write('\u211d \u2211'.encode())"
+    done = run_process([sys.executable, "-c", code], tmp_path, 10)
+    assert done.stdout == "\u211d \u2211"
+
+
+def test_a_command_that_cannot_start_is_named(tmp_path):
+    with pytest.raises(BenchmarkError, match="no-such-program-xyz"):
+        run_process(["no-such-program-xyz", "--flag"], tmp_path, 5)
+
+
+def recording_runner(tmp_path):
+    benchmark = LeanBenchmark(
+        name="b",
+        repository="https://example.com/miniF2F",
+        commit="f0a20e14c1ee" + "0" * 28,
+        file="A.lean",
+        theorems=1,
+        shipped_proofs=(),
+        lean_options=("autoImplicit=false", "relaxedAutoImplicit=false"),
+        allowed_axioms=(),
+        judge_repository="https://example.com/SafeVerify",
+        judge_commit="b291b588a539" + "0" * 28,
+    )
+    calls = []
+
+    def record(command, cwd, limit):
+        calls.append((command, cwd, limit))
+        return Finished(0, "", "", 0.0)
+
+    data = tmp_path / "data"
+    return LeanRunner(benchmark, data, run_process=record), calls, data
+
+
+def test_compile_runs_lean_in_the_checkout_with_the_options_and_relative_paths(tmp_path):
+    runner, calls, data = recording_runner(tmp_path)
+    work = data / "lean" / "work" / "x"
+    runner.compile(work / "Submission.lean", work / "Submission.olean", 7)
+    assert calls == [
+        (
+            [
+                "lake", "env", "lean", "--json",
+                "-D", "autoImplicit=false", "-D", "relaxedAutoImplicit=false",
+                "--root=../work/x", "-o", "../work/x/Submission.olean", "../work/x/Submission.lean",
+            ],
+            data / "lean" / "miniF2F-f0a20e14c1ee",
+            7,
+        )
+    ]  # fmt: skip
+
+
+def test_judge_runs_safeverify_through_lake_env_with_relative_paths(tmp_path):
+    runner, calls, data = recording_runner(tmp_path)
+    work = data / "lean" / "work" / "x"
+    runner.judge(work / "Reference.olean", work / "Submission.olean", work / "judge.json", 9)
+    assert calls == [
+        (
+            [
+                "lake", "env", "../SafeVerify-b291b588a539/.lake/build/bin/safe_verify",
+                "--save", "../work/x/judge.json",
+                "../work/x/Reference.olean", "../work/x/Submission.olean",
+            ],
+            data / "lean" / "miniF2F-f0a20e14c1ee",
+            9,
+        )
+    ]  # fmt: skip
+
+
+def test_a_work_directory_is_removed_even_when_the_check_raises(tmp_path):
+    runner, _, data = recording_runner(tmp_path)
+    with pytest.raises(RuntimeError), runner.work_dir() as work:
+        assert work.parent == data / "lean" / "work" and work.is_dir()
+        (work / "x.olean").write_text("x")
+        seen = work
+        raise RuntimeError("boom")
+    assert not seen.exists()
+    with runner.work_dir() as again:
+        assert again != seen
