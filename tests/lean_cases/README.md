@@ -84,7 +84,7 @@ makes the module names simply `Target` and `Submission`. `-D name=value` (with a
 | `weakened` | statement_changed | 0 | 1 | `failureMode` `"thmType"` (`theorem type mismatch`) | yes |
 | `renamed` | statement_changed | 0 | 1 | `failureMode` `"notFound"`, `solutionInfo` null | yes |
 | `reformatted` | proved | 0 | 0 | `failureMode` null | yes |
-| `native_decide` | axioms | 0 | 1 | no `judge.json`; stderr `uncaught exception: (kernel) (interpreter) unknown declaration 'pi_case._nativeDecide_1_1'` | rejected, different reason, see note 2 |
+| `native_decide` | kernel_rejected | 0 | 1 | no `judge.json`; stderr `uncaught exception: (kernel) (interpreter) unknown declaration 'pi_case._nativeDecide_1_1'` | rejected, see note 2 |
 | `fake_success_exit` | statement_changed | 0 | 1 | `failureMode` `"notFound"`; the compile printed `Finished.` (information) and `using 'exit' to interrupt Lean` (warning) | yes |
 | `add_false` | not proved | **1** | skipped | did not compile on Lean 4.27, see note 3 | not proved |
 | `replace_axiom` | not proved | 0 | 1 | no `judge.json`; stderr `uncaught exception: (kernel) application type mismatch` / `False.elim @propext` | not proved, see note 4 |
@@ -102,7 +102,7 @@ No case expected to fail was accepted, and none of the three exploits was accept
    `judge.json` is clean (`failureMode` null, axioms `["propext"]`). So "proved" has to require
    judge exit 0 as well as a null `failureMode`, and the stderr line
    `<name> used disallowed axioms. #[...]` is the only place the reason appears.
-2. `native_decide`: the expected `axioms` failure (`Lean.ofReduceBool`) never happens. During
+2. `native_decide`: an `axioms` failure (`Lean.ofReduceBool`) never happens. During
    replay of the submission, SafeVerify's kernel check throws because the auxiliary declaration
    `pi_case._nativeDecide_1_1` is unknown to the interpreter, and the judge exits 1 with no
    `judge.json`. The submission is rejected, but through an uncaught exception, not a
@@ -133,9 +133,10 @@ No case expected to fail was accepted, and none of the three exploits was accept
 
 ### Record-only cases
 
-- `skip_kernel`: `set_option debug.skipKernelTC true in` changes nothing for a valid proof. The
-  judge accepts it, because SafeVerify replays and kernel-checks the `.olean` on its own whatever
-  the option was during the compile.
+- `skip_kernel`: a valid proof under `set_option debug.skipKernelTC true in` is still accepted,
+  because the judge replays it in the kernel either way. The evidence that the replay checks is
+  `add_false_env`, whose declaration the kernel never checked during the compile and the replay
+  rejects.
 - `renamed_binders`: binder names are not part of the comparison. `(x y : ℕ) (hxy : x ≤ y)`
   passes against a target written with `(a b : ℕ) (h : a ≤ b)`.
 - `answer_wrapper`: with `import MiniF2F.ProblemImports`, a target stating `x = answer(2)` does
@@ -158,9 +159,16 @@ No case expected to fail was accepted, and none of the three exploits was accept
 
 ## Attribution
 
-`add_false/Submission.lean` and `replace_axiom/{Target,Submission}.lean` are adapted from
-SafeVerify's `SafeVerifyTest/AddFalse/Bad.lean`, `SafeVerifyTest/ReplaceAxiom/Bad.lean`, and
-`SafeVerifyTest/ReplaceAxiom/Target.lean` (https://github.com/GasStationManager/SafeVerify,
-Apache License 2.0). The changes: `import Mathlib` replaces the original first line
-(`import Batteries.Tactic.OpenPrivate`) in the two submissions and is prepended to the target.
-`add_false/Target.lean` restates that test's target with `by sorry`.
+Three files are adapted from SafeVerify (https://github.com/GasStationManager/SafeVerify) at
+commit `b291b588a53999a7e837dda61c7dbfe8c550c814`, under the Apache License 2.0. Its licence
+text is in [`SafeVerify-LICENSE.txt`](SafeVerify-LICENSE.txt).
+
+| File here | SafeVerify's file | What was changed |
+| --- | --- | --- |
+| `add_false/Submission.lean` | `SafeVerifyTest/AddFalse/Bad.lean` | `import Mathlib` replaces the first line, `import Batteries.Tactic.OpenPrivate` |
+| `replace_axiom/Submission.lean` | `SafeVerifyTest/ReplaceAxiom/Bad.lean` | `import Mathlib` replaces the first line, `import Batteries.Tactic.OpenPrivate` |
+| `replace_axiom/Target.lean` | `SafeVerifyTest/ReplaceAxiom/Target.lean` | `import Mathlib` is added as the first line |
+
+Each of the three ends with a comment line saying so. That line was added after the output was
+captured; it follows every other line, so it moves none of the positions the captured messages
+give. `add_false/Target.lean` restates that test's target with `by sorry`.

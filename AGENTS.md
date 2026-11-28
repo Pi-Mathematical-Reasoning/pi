@@ -60,6 +60,28 @@ the brief, [PI_PROJECT.md](PI_PROJECT.md).
   states them. A change to how answers are found or compared bumps
   `RULES_VERSION` in `src/pi/grading.py` and updates that document. Debug the
   grader on development problems, never on evaluation problems.
+- **Never run the model on `benchmarks/minif2f-test.toml`** outside a
+  pre-registered run. It is the scored proof benchmark; its theorems are
+  evaluation problems.
+- **The Lean rules are versioned too.**
+  [docs/lean-grading.md](docs/lean-grading.md) states them. A change to how
+  the code is found, how the file is built or how the judge's outcome is read
+  bumps `LEAN_RULES_VERSION` in `src/pi/lean_grading.py` and updates that
+  document. Debug the Lean grader on the cases in `tests/lean_cases/` and on
+  validation theorems, never on test theorems.
+- **Run the real-Lean tests before a pull request that touches the Lean
+  grader:**
+
+  ```sh
+  PI_LEAN_TESTS=1 uv run pytest tests/test_lean_real.py
+  ```
+
+  They need `uv run pi lean-setup --benchmark benchmarks/minif2f-test.toml`
+  first and take about a quarter of an hour. One judge run peaks near 25 GB
+  of memory, so never run two Lean checks at once.
+- **Proof files are never committed.** A Lean run's `proofs/` directory
+  restates the benchmark's theorems; it is published to the bucket with the
+  run, and `.gitignore` keeps `experiments/*/proofs/` out of git.
 - **Never publish to the artifacts bucket yourself.** `pi publish` uploads with
   the owner's admin credentials; the owner runs it, or asks you to.
 - **Weights and checkpoints never go in git.** The brief keeps durable
