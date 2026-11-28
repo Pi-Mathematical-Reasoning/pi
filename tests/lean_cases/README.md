@@ -4,6 +4,7 @@ Captured output of the two-step Lean check, run by hand on 2026-11-27 on an Appl
 (48 GB). Each directory holds one case: `Target.lean` (the statement closed with `sorry`),
 `Submission.lean` (the proof under test), and what the tools printed for it. The theorems are
 original to this repository, except `add_false` and `replace_axiom` (see the end).
+`add_false_env` uses the same idea as SafeVerify's AddFalse test but is written here.
 
 The captured files are the tools' real output and must not be edited. A later task parses them.
 
@@ -62,7 +63,8 @@ makes the module names simply `Target` and `Submission`. `-D name=value` (with a
   `[["pi_case", {"targetInfo": {...}, "solutionInfo": {...} | null, "failureMode": ...}]]`.
   `targetInfo` and `solutionInfo` hold only `{"constInfo": {"kind": ...}, "axioms": [...]}`.
   **`valid/judge.json` holds exactly one pair.** It is written only when the judge gets as far as
-  the declaration checks. A kernel or replay exception (`native_decide`, `replace_axiom`) exits 1
+  the declaration checks. A kernel or replay exception (`native_decide`, `replace_axiom`,
+  `add_false_env`) exits 1
   before writing it, so those cases have no `judge.json`.
 - SafeVerify writes `judge.json` without a final newline. The repository's `end-of-file-fixer`
   hook added one when the files were committed. That is the only change from the tools' bytes.
@@ -86,11 +88,12 @@ makes the module names simply `Target` and `Submission`. `-D name=value` (with a
 | `fake_success_exit` | statement_changed | 0 | 1 | `failureMode` `"notFound"`; the compile printed `Finished.` (information) and `using 'exit' to interrupt Lean` (warning) | yes |
 | `add_false` | not proved | **1** | skipped | did not compile on Lean 4.27, see note 3 | not proved |
 | `replace_axiom` | not proved | 0 | 1 | no `judge.json`; stderr `uncaught exception: (kernel) application type mismatch` / `False.elim @propext` | not proved, see note 4 |
+| `add_false_env` | not proved | 0 | 1 | no `judge.json`; stderr `uncaught exception: (kernel) declaration type mismatch, 'pi_false' has type` / `True` / `but it is expected to have type` / `False` | not proved, see note 5 |
 | `skip_kernel` | record | 0 | 0 | `failureMode` null (accepted) | recorded |
 | `renamed_binders` | record | 0 | 0 | `failureMode` null (accepted) | recorded |
 | `answer_wrapper` | record | 0 | 1 | `failureMode` `"thmType"` | recorded |
 
-No case expected to fail was accepted, and neither exploit was accepted.
+No case expected to fail was accepted, and none of the three exploits was accepted.
 
 ### Notes
 
@@ -109,12 +112,24 @@ No case expected to fail was accepted, and neither exploit was accepted.
    unmodified `SafeVerifyTest/AddFalse/Bad.lean` (with its original
    `import Batteries.Tactic.OpenPrivate`) fails with the same four errors, so the cause is not the
    import change. This case has no judge files. Drop it from the list of judge-replay cases.
+   `add_false_env` is the false-declaration exploit that does compile on 4.27.
 4. `replace_axiom`: the submission compiles. Its `#eval` rewrites `propext` to `False` in the
    elaborator's environment, and its `#guard_msgs` passes. SafeVerify's `Environment.replay`
    re-checks the submission's declarations against the real `propext` and throws
    `(kernel) application type mismatch`, so the judge exits 1 with no `judge.json`. The message is
    not the `kernel verification failed for '...'` form. That form comes from SafeVerify's later
    `Kernel.check` pass, which this case never reaches.
+5. `add_false_env`: the submission's `#eval` calls the public `Environment.addDeclCore` with
+   `doCheck := false`. That adds a new theorem `pi_false : False` whose value is `True.intro`,
+   which the kernel never checks. Then `theorem falseThm : False := pi_false` is accepted by the
+   compiler (exit 0, no messages). Inserting the constant only into the kernel's constant map, the
+   way `replace_axiom` does, is not enough on 4.27: the elaborator then reports
+   ``Unknown constant `pi_false` ``, because it looks up local constants through its own map.
+   The `.olean` carries `pi_false`. SafeVerify's `Environment.replay` type-checks it, throws
+   `(kernel) declaration type mismatch`, and the judge exits 1 with no `judge.json`.
+   An in-file axiom check would have been fooled. Appending `#print axioms falseThm` to the
+   submission (run by hand, not captured) compiles with exit 0 and prints the `information`
+   message `'falseThm' does not depend on any axioms`.
 
 ### Record-only cases
 
