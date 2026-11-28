@@ -15,3 +15,4 @@ add_false
 
 theorem falseThm : False :=
   false
+-- Adapted from SafeVerify at b291b588a53999a7e837dda61c7dbfe8c550c814, SafeVerifyTest/AddFalse/Bad.lean (Apache-2.0): import Mathlib replaces its first line.

@@ -36,3 +36,4 @@ theorem efsq : ∀ (x y z n : Nat),
 #guard_msgs in
 -- 'efsq' depends on axioms: [propext]
 #print axioms efsq
+-- Adapted from SafeVerify at b291b588a53999a7e837dda61c7dbfe8c550c814, SafeVerifyTest/ReplaceAxiom/Bad.lean (Apache-2.0): import Mathlib replaces its first line.
