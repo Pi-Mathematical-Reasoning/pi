@@ -8,6 +8,7 @@ Lean, through the runner it is given.
 
 import hashlib
 import json
+import os
 import re
 import textwrap
 from collections.abc import Sequence
@@ -234,14 +235,18 @@ def check(
             return failed("lean_error", compiled)
         if _digest(reference) != before:
             return failed("judge_error", compiled)
-
+        compiled_submission = work / "Submission.olean"
         saved_path = work / "judge.json"
-        judged = runner.judge(
-            reference, work / "Submission.olean", saved_path, limits.judge_seconds
-        )
+        if not compiled_submission.is_file() or os.path.lexists(saved_path):
+            return failed("judge_error", compiled)  # no olean, or an outcome planted early
+
+        judged = runner.judge(reference, compiled_submission, saved_path, limits.judge_seconds)
         saved = _read_saved(saved_path)
+        after = _digest(reference)
 
     reason, axioms = judgement(judged, saved, allowed, theorem.id)
+    if after != before:
+        reason = "judge_error"  # the reference changed while the judge read it
     record = _record(reason, compiled, code, judged, saved, axioms)
     if reason is not None:
         return LeanGrade("failed", code, submission, record)

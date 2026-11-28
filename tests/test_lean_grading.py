@@ -452,3 +452,48 @@ def test_the_grader_version_names_the_rules_the_judge_and_the_allowlist():
         "judge_commit": "b" * 40,
         "allowed_axioms": ["propext", "Quot.sound"],
     }
+
+
+def _plant_passing_outcome(source, olean):
+    if source.name == "Submission.lean":
+        (olean.parent / "judge.json").write_text(json.dumps(PASSING))
+
+
+def test_a_judge_outcome_planted_before_the_judge_ran_is_a_judge_error():
+    runner = passing_runner(on_compile=_plant_passing_outcome, saved=[None])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert runner.judge_calls() == []
+
+
+@pytest.mark.parametrize("kind", ["directory", "symlink"])
+def test_any_entry_at_the_judge_s_path_before_it_ran_is_a_judge_error(kind):
+    def plant(source, olean):
+        if source.name == "Submission.lean":
+            path = olean.parent / "judge.json"
+            path.mkdir() if kind == "directory" else path.symlink_to(olean.parent / "absent")
+
+    runner = passing_runner(on_compile=plant)
+    assert check(T, fenced(FULL), runner, LIMITS, ALLOWED).lean["reason"] == "judge_error"
+    assert runner.judge_calls() == []
+
+
+def test_a_reference_changed_while_the_judge_ran_is_a_judge_error():
+    def rewrite(reference, submission, saved):
+        reference.write_bytes(b"a different reference")
+
+    runner = passing_runner(on_judge=rewrite)
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert len(runner.judge_calls()) == 1
+
+
+def test_a_clean_compile_that_left_no_submission_olean_is_a_judge_error():
+    def remove(source, olean):
+        if source.name == "Submission.lean":
+            olean.unlink()
+
+    runner = passing_runner(on_compile=remove)
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert runner.judge_calls() == []

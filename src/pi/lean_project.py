@@ -232,7 +232,11 @@ class Finished:
 
 
 def run_process(command: list[str], cwd: Path, limit: float) -> Finished:
-    """Run a command; at `limit` seconds kill it and everything it started."""
+    """Run a command; at `limit` seconds kill it and everything it started.
+
+    The process group is killed after every run, a normal exit included, so nothing the
+    command left behind outlives the call (a child that starts its own session escapes this).
+    """
     started = time.monotonic()
     try:
         process = subprocess.Popen(
@@ -252,21 +256,25 @@ def run_process(command: list[str], cwd: Path, limit: float) -> Finished:
         stdout, stderr = process.communicate(timeout=limit)
         exit_code = process.returncode
     except subprocess.TimeoutExpired:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
+        _kill_group(process)
         stdout, stderr = process.communicate()
         exit_code = None
     except BaseException:  # an interrupt must not leave Lean or the judge running
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
+        _kill_group(process)
         process.wait()
         raise
+    _kill_group(process)  # whatever the command started in the background goes with it
     return Finished(
         exit_code=exit_code,
         stdout=stdout.decode("utf-8", errors="replace"),
         stderr=stderr.decode("utf-8", errors="replace"),
         seconds=time.monotonic() - started,
     )
+
+
+def _kill_group(process: subprocess.Popen) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
 
 
 class LeanRunner:

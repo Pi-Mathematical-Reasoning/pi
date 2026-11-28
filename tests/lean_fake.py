@@ -3,8 +3,9 @@
 `compile` writes bytes to the `.olean` path it is given (so hashing works), then calls
 `on_compile(source, olean)` if one was given (a test can rewrite or delete a file there), and
 returns the next queued `Finished`. `judge` writes the next queued `saved` value to the saved
-path (as JSON; `bytes` are written as they are; `None` writes nothing) and returns the next
-queued `Finished`. Every call is appended to `calls` with its limit, in order, and the text of
+path (as JSON; `bytes` are written as they are; `None` writes nothing), then calls
+`on_judge(reference, submission, saved)` if one was given, and returns the next queued
+`Finished`. Every call is appended to `calls` with its limit, in order, and the text of
 each compiled source is kept in `sources` by file name, since the work directory is removed.
 """
 
@@ -24,11 +25,13 @@ class FakeRunner:
         judges: Sequence[Finished] = (),
         saved: Sequence[object] = (),
         on_compile: Callable[[Path, Path], None] | None = None,
+        on_judge: Callable[[Path, Path, Path], None] | None = None,
     ):
         self.compiles = list(compiles)
         self.judges = list(judges)
         self.saved = list(saved)
         self.on_compile = on_compile
+        self.on_judge = on_judge
         self.calls: list[tuple] = []
         self.sources: dict[str, str] = {}
         self.work: Path | None = None
@@ -54,6 +57,8 @@ class FakeRunner:
             saved.write_bytes(value)
         elif value is not None:
             saved.write_text(json.dumps(value), encoding="utf-8")
+        if self.on_judge is not None:
+            self.on_judge(reference, submission, saved)
         return self.judges.pop(0)
 
     def judge_calls(self) -> list[tuple]:

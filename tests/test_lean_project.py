@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -356,6 +357,30 @@ def test_an_interrupted_wait_kills_the_process_group_and_propagates(tmp_path):
         assert not _alive(int((tmp_path / "pid").read_text()))
     finally:  # leave no stray sleep behind if the assertions fail
         timer.cancel()
+        if (tmp_path / "pid").exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int((tmp_path / "pid").read_text()), signal.SIGKILL)
+
+
+def _dies_soon(pid: int) -> bool:
+    """Whether the process is gone within a second; a killed orphan is reaped a moment later."""
+    deadline = time.monotonic() + 1
+    while _alive(pid):
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+def test_a_child_left_behind_by_a_command_that_exits_is_killed(tmp_path):
+    script = tmp_path / "start.sh"
+    script.write_text("sleep 60 < /dev/null > /dev/null 2>&1 &\necho $! > pid\nexit 0\n")
+    try:
+        done = run_process(["sh", str(script)], tmp_path, limit=30)
+        pid = int((tmp_path / "pid").read_text())
+        assert done.exit_code == 0 and done.seconds < 1
+        assert _dies_soon(pid)
+    finally:  # leave no stray sleep behind if the assertions fail
         if (tmp_path / "pid").exists():
             with contextlib.suppress(ProcessLookupError):
                 os.kill(int((tmp_path / "pid").read_text()), signal.SIGKILL)
