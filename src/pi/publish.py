@@ -14,12 +14,11 @@ from pathlib import Path
 
 import yaml
 
-from pi.audit import AUDIT, REPORT, fingerprint
-from pi.evaluation import RESULTS, RUN
+from pi.audit import AUDIT, fingerprint
 from pi.revision import code_revision
 
 MANIFEST = "_manifest.json"
-FILES = (RUN, RESULTS, REPORT, AUDIT)
+PROOFS = "proofs"
 
 
 class PublishError(Exception):
@@ -39,13 +38,22 @@ def publish_run(out: Path, bucket: str, s3, prefix: str = "data/runs/") -> dict:
     """Upload the run's files, then its manifest. Each file's outcome, by name."""
     out = Path(out)
     audit = _passed_audit(out)
-    files = {name: fingerprint(out / name) for name in FILES}
+    names = [*audit["files"], AUDIT]
+    for name in names:
+        _inside(out, name)
     for name, recorded in audit["files"].items():
-        if files[name] != recorded:
+        path = out / name
+        if not path.is_file() or fingerprint(path) != recorded:
             raise PublishError(f"{name} has changed since it was audited; run `pi audit` again")
+    folder = out / PROOFS
+    if folder.is_dir():
+        for path in sorted(folder.iterdir()):
+            if f"{PROOFS}/{path.name}" not in audit["files"]:
+                raise PublishError(f"{PROOFS}/{path.name} was not audited; run `pi audit` again")
+    files = {name: fingerprint(out / name) for name in names}
 
     base = f"{prefix}{out.name}/"
-    outcome = {name: _put(s3, bucket, base + name, out / name) for name in FILES}
+    outcome = {name: _put(s3, bucket, base + name, out / name) for name in names}
 
     manifest = {
         "run": out.name,
@@ -56,6 +64,12 @@ def publish_run(out: Path, bucket: str, s3, prefix: str = "data/runs/") -> dict:
     }
     outcome[MANIFEST] = _put_manifest(s3, bucket, base + MANIFEST, manifest)
     return outcome
+
+
+def _inside(out: Path, name: str) -> None:
+    """Refuse a name from the audit that points outside the run's directory."""
+    if Path(name).is_absolute() or ".." in Path(name).parts:
+        raise PublishError(f"{name!r} in the audit points outside {out}; nothing was published")
 
 
 def _passed_audit(out: Path) -> dict:
