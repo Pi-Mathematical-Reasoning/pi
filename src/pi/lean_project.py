@@ -15,6 +15,8 @@ import secrets
 import shutil
 import signal
 import subprocess
+import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -297,24 +299,35 @@ def _kill_group(process: subprocess.Popen) -> None:
         os.killpg(process.pid, signal.SIGKILL)
 
 
+WAITING = "waiting for another Lean check on this machine to finish"
+# The locks this thread holds: taking one again would wait for itself forever.
+_held = threading.local()
+
+
 @contextlib.contextmanager
 def _exclusive(lock: Path) -> Iterator[None]:
-    """Hold an exclusive lock on the file, or refuse at once if anything else holds it.
+    """Hold an exclusive lock on the file, waiting for whatever holds it to let go.
 
-    The kernel releases the lock when the file is closed or its process dies, so a crash
-    leaves nothing to clear. A second lock taken in the same process is refused too.
+    If the lock is taken, WAITING is printed once to standard error before the wait. Every
+    check ends within its limits, and the kernel releases a lock when the file is closed or
+    its process dies, so the wait ends and a crash leaves nothing to clear.
     """
+    key = os.path.realpath(lock)
+    held = _held.__dict__.setdefault("locks", set())
+    if key in held:
+        raise RuntimeError(f"a Lean work directory is already open in this thread ({lock})")
     descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise BenchmarkError(
-                f"another Lean check is running on this machine (it holds {lock}); "
-                "only one may run at a time, since one judge run needs about 25 GB: "
-                "wait for it to end, then run the same command again"
-            ) from None
-        yield
+            print(WAITING, file=sys.stderr, flush=True)
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        held.add(key)
+        try:
+            yield
+        finally:
+            held.discard(key)
     finally:
         os.close(descriptor)  # releases the lock
 
@@ -342,7 +355,8 @@ class LeanRunner:
         """A fresh directory under `<data dir>/lean/work/`, removed on exit.
 
         It is made, used and removed under an exclusive lock on `<data dir>/lean/work/.lock`,
-        so only one check runs on the machine at a time: one judge run needs about 25 GB.
+        so only one check runs on the machine at a time (one judge run needs about 25 GB); a
+        check that finds the lock taken waits for it.
         """
         parent = self.data_dir / "lean" / "work"
         parent.mkdir(parents=True, exist_ok=True)

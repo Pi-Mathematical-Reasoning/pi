@@ -535,28 +535,68 @@ def test_a_work_directory_is_removed_even_when_the_check_raises(tmp_path):
         assert again != seen
 
 
-def test_a_second_check_is_refused_while_one_is_running_and_allowed_after(tmp_path):
+WAITING = "waiting for another Lean check on this machine to finish\n"
+
+
+def _enter_in_thread(runner):
+    """Open `runner.work_dir()` in a thread; the events say when it is in and when to leave."""
+    entered, leave = threading.Event(), threading.Event()
+
+    def work():
+        with runner.work_dir():
+            entered.set()
+            leave.wait(10)
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    return thread, entered, leave
+
+
+def test_a_second_check_waits_for_the_first_then_proceeds(tmp_path, capsys):
     runner, _, data = recording_runner(tmp_path)
     other = LeanRunner(runner.benchmark, data)
     with runner.work_dir():
-        for second in (runner, other):  # the same runner nested, or another in this process
-            refused = pytest.raises(BenchmarkError, match="another Lean check is running")
-            with refused, second.work_dir():
-                pass
-        assert len([p for p in (data / "lean" / "work").iterdir() if p.is_dir()]) == 1
+        thread, entered, leave = _enter_in_thread(other)
+        try:
+            assert not entered.wait(0.5)  # waiting, not refused
+            assert len([p for p in (data / "lean" / "work").iterdir() if p.is_dir()]) == 1
+        finally:
+            leave.set()
+    assert entered.wait(5)
+    thread.join(5)
+    assert capsys.readouterr().err == WAITING
+
+
+def test_a_check_that_finds_the_lock_free_prints_nothing(tmp_path, capsys):
+    runner, _, _ = recording_runner(tmp_path)
+    with runner.work_dir() as work:
+        assert work.is_dir()
+    with runner.work_dir():
+        pass
+    assert capsys.readouterr().err == ""
+
+
+def test_a_nested_work_directory_in_one_thread_is_a_programming_error(tmp_path):
+    # Waiting for a lock the same thread holds would never end.
+    runner, _, data = recording_runner(tmp_path)
+    other = LeanRunner(runner.benchmark, data)
+    nested = pytest.raises(RuntimeError, match="already open in this thread")
+    with runner.work_dir(), nested, other.work_dir():
+        pass
     with other.work_dir() as work:
         assert work.is_dir()
 
 
-def test_the_lock_is_released_when_a_check_raises(tmp_path):
+def test_the_lock_is_released_when_a_check_raises(tmp_path, capsys):
     runner, _, _ = recording_runner(tmp_path)
     with pytest.raises(RuntimeError), runner.work_dir():
         raise RuntimeError("boom")
     with runner.work_dir() as work:
         assert work.is_dir()
+    assert capsys.readouterr().err == ""
 
 
-def test_a_lock_left_by_a_process_that_died_does_not_block(tmp_path):
+def test_a_lock_held_by_a_process_that_dies_stops_blocking(tmp_path, capsys):
     runner, _, data = recording_runner(tmp_path)
     with runner.work_dir():
         pass
@@ -566,13 +606,15 @@ def test_a_lock_left_by_a_process_that_died_does_not_block(tmp_path):
     child = subprocess.Popen([sys.executable, "-c", hold, str(lock)], stdout=subprocess.PIPE)
     try:
         assert child.stdout.readline() == b"locked\n"
-        with pytest.raises(BenchmarkError, match="only one may run at a time"), runner.work_dir():
-            pass
+        thread, entered, leave = _enter_in_thread(runner)
+        leave.set()
+        assert not entered.wait(0.5)  # waits on the other process
         child.kill()  # dies holding the lock, as a crashed pi would
         child.wait(timeout=10)
+        assert entered.wait(5)
+        thread.join(5)
         assert lock.exists()
-        with runner.work_dir() as work:
-            assert work.is_dir()
+        assert capsys.readouterr().err == WAITING
     finally:
         child.kill()
         child.wait(timeout=10)

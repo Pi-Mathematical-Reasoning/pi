@@ -232,7 +232,7 @@ def check(
         before = _digest(reference)
         if compiled.exit_code != 0 or _has_error(compiled) or before is None:
             # Compiled before any of the reply's code runs: the setup or the machine failed.
-            raise _reference_error(theorem, compiled, limits)
+            raise _reference_error(theorem, compiled, limits, reference)
 
         compiled = _compile(runner, work / "Submission.lean", submission, limits)
         if compiled.exit_code is None:
@@ -259,11 +259,14 @@ def check(
     return LeanGrade("proved", code, submission, record)
 
 
-def _reference_error(theorem: Theorem, compiled: Finished, limits: Limits) -> BenchmarkError:
+def _reference_error(
+    theorem: Theorem, compiled: Finished, limits: Limits, olean: Path
+) -> BenchmarkError:
     if compiled.exit_code is None:
         what = f"was killed at the {limits.compile_seconds:g}-second compile limit"
     elif compiled.exit_code == 0 and not _has_error(compiled):
-        what = "compiled but wrote no .olean file"
+        left = "an .olean that cannot be read" if os.path.lexists(olean) else "no .olean file"
+        what = f"compiled but left {left}"
     else:
         what = "did not compile"
     tail = "\n".join((compiled.stdout + compiled.stderr).strip().splitlines()[-20:])
@@ -282,9 +285,14 @@ def _compile(runner, source: Path, text: str, limits: Limits) -> Finished:
 
 
 def _digest(path: Path) -> str | None:
+    """The file's SHA-256, or None if it cannot be read as a file: missing, a directory, unreadable.
+
+    After the reply's code has run, None differs from the first digest, so the check fails as
+    `judge_error`; for the first digest it is a setup failure.
+    """
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
-    except FileNotFoundError:
+    except OSError:
         return None
 
 

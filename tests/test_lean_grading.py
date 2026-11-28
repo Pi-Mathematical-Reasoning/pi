@@ -398,6 +398,39 @@ def test_a_reference_removed_before_the_judge_ran_is_a_judge_error():
     assert runner.judge_calls() == []
 
 
+def _spoil(path):
+    """Leave something at the path that cannot be read as a file."""
+    path.unlink()
+    path.mkdir()
+
+
+@pytest.mark.parametrize("spoil", ["directory", "unreadable"])
+def test_a_reference_spoiled_by_the_submission_s_compile_is_a_judge_error(spoil):
+    def spoiled(source, olean):
+        if source.name == "Submission.lean":
+            reference = olean.parent / "Reference.olean"
+            _spoil(reference) if spoil == "directory" else reference.chmod(0)
+
+    runner = passing_runner(on_compile=spoiled)
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert runner.judge_calls() == []
+
+
+def test_a_reference_spoiled_while_the_judge_ran_is_a_judge_error():
+    runner = passing_runner(on_judge=lambda reference, submission, saved: _spoil(reference))
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert len(runner.judge_calls()) == 1
+
+
+def test_a_reference_unreadable_after_its_own_compile_stops_the_check_without_a_verdict():
+    runner = FakeRunner(compiles=[OK], on_compile=lambda source, olean: _spoil(olean))
+    with pytest.raises(BenchmarkError, match="(?s)fixture_add_zero: .*pi lean-setup"):
+        check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert [call[1] for call in runner.calls] == ["Reference.lean"]
+
+
 @pytest.mark.parametrize("saved", [None, b'[["fixture_add_zero", {', b"\xff\xfe"])
 def test_a_judge_pass_without_a_readable_saved_outcome_is_a_judge_error(saved):
     grade = check(T, fenced(FULL), passing_runner(saved=[saved]), LIMITS, ALLOWED)
