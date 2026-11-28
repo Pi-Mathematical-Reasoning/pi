@@ -624,7 +624,6 @@ judge_time_limit_seconds = 300
 
 ```python
 class AnswerTask:
-    solved = "correct"
     blank: dict = {}                                        # extra fields of an ungraded result
     def identity(self, benchmark, problems) -> dict         # {"benchmark": {...as today...}, "grader": grader_version()}
     def check(self, problems) -> None                       # today's _check_references
@@ -673,7 +672,6 @@ def lean_prompt(instruction: str, theorem: Theorem) -> str
     # f"{instruction}\n\n```lean4\n{theorem.header}\n{theorem.statement} := by\n```\n"
 
 class LeanTask:
-    solved = "proved"
     blank = {"proof": None, "lean": None}
     def __init__(self, benchmark: LeanBenchmark, settings: LeanSettings, runner, environment: dict, out: Path,
                  release: Callable[[], None] = lambda: None): ...
