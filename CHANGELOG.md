@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/Pi-Mathematical-Reasoning/pi/compare/v0.4.0...v0.5.0) (2026-11-28)
+
+
+### Features
+
+* add pi audit and pi publish ([#18](https://github.com/Pi-Mathematical-Reasoning/pi/issues/18)) ([ec1cb5e](https://github.com/Pi-Mathematical-Reasoning/pi/commit/ec1cb5ea13d62c423f2d7c32e6298a636e8d3a04))
+* add the jaws project file for pi-prover ([#15](https://github.com/Pi-Mathematical-Reasoning/pi/issues/15)) ([f6d7871](https://github.com/Pi-Mathematical-Reasoning/pi/commit/f6d7871d3ccaa5b41ff9e620752f271eefe6db6e))
+* hold scored runs to committed code, mains power and verified weights ([#17](https://github.com/Pi-Mathematical-Reasoning/pi/issues/17)) ([f31e87c](https://github.com/Pi-Mathematical-Reasoning/pi/commit/f31e87cf5d8259a73527b319b6e968eeb90db9f3))
+* record live diagnostics for every attempt and pin ollama's launch ([#21](https://github.com/Pi-Mathematical-Reasoning/pi/issues/21)) ([0748543](https://github.com/Pi-Mathematical-Reasoning/pi/commit/074854302f9b5ffd55fea8834d87f40203a51064))
+
+
+### Bug Fixes
+
+* report a run with a session that was stopped outright ([#19](https://github.com/Pi-Mathematical-Reasoning/pi/issues/19)) ([1bf8e0b](https://github.com/Pi-Mathematical-Reasoning/pi/commit/1bf8e0b5a1c7df1bfeb0e8ebd447c31fb4646aa3))
+
 ## [0.4.0](https://github.com/Pi-Mathematical-Reasoning/pi/compare/v0.3.0...v0.4.0) (2026-11-21)
 
 
