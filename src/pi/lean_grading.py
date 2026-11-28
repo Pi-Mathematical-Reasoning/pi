@@ -16,7 +16,18 @@ LEAN_RULES_VERSION = 1
 MESSAGE_CAP = 20_000
 
 _TAGS = {"", "lean", "lean4"}
-_FLAGGED = ["#eval", "run_cmd", "elab", "macro", "syntax", "initialize", "IO."]
+_FLAGGED = [
+    "#eval",
+    "run_cmd",
+    "elab",
+    "elab_rules",
+    "macro",
+    "macro_rules",
+    "syntax",
+    "declare_syntax_cat",
+    "initialize",
+    "IO.",
+]
 _SORRY = "sorryAx"
 
 
@@ -44,25 +55,48 @@ def _declares(theorem: Theorem, code: str) -> bool:
     return re.search(pattern, code, re.MULTILINE) is not None
 
 
-def _drop_imports(code: str) -> str:
-    lines = code.strip().splitlines()
-    while lines and (not lines[0].strip() or lines[0].startswith("import ")):
-        lines.pop(0)
-    return "\n".join(lines).strip("\n")
+def _trim_blank_lines(lines: list[str]) -> list[str]:
+    start, end = 0, len(lines)
+    while start < end and not lines[start].strip():
+        start += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return lines[start:end]
+
+
+def _drop_imports(lines: list[str]) -> list[str]:
+    start = 0
+    while start < len(lines) and (
+        not lines[start].strip() or lines[start].strip().startswith("import ")
+    ):
+        start += 1
+    return lines[start:]
+
+
+def _dedent(lines: list[str]) -> list[str]:
+    return textwrap.dedent("\n".join(lines)).split("\n") if lines else []
+
+
+def _proof_body(lines: list[str]) -> list[str]:
+    """The tactic lines of a proof-only block, without its `:=` and `by`."""
+    first = lines[0].lstrip()
+    if first.startswith(":="):
+        first = first[2:].lstrip()
+    if re.match(r"by\b", first):
+        first = first[2:].lstrip()
+    rest = _dedent(([first] if first else []) + lines[1:])
+    return [("  " + line) if line.strip() else line for line in rest]
 
 
 def assemble(theorem: Theorem, code: str) -> str:
     """The submission file: the header, then the block (or its proof under the statement)."""
-    rest = _drop_imports(code)
-    if _declares(theorem, rest):
-        return theorem.header + "\n" + rest + "\n"
-    body = rest.strip()
-    if body.startswith(":="):
-        body = body[2:].lstrip()
-    if re.match(r"by\b", body):
-        body = body[2:]
-    body = textwrap.indent(textwrap.dedent(body.strip("\n")), "  ", lambda line: bool(line.strip()))
-    return theorem.header + "\n" + theorem.statement + " := by\n" + body.rstrip() + "\n"
+    lines = _dedent(_drop_imports(_trim_blank_lines(code.splitlines())))
+    remainder = "\n".join(lines)
+    if _declares(theorem, remainder):
+        return theorem.header + "\n" + remainder + "\n"
+    body = _proof_body(lines) if lines else []
+    tail = "".join(line + "\n" for line in body)
+    return theorem.header + "\n" + theorem.statement + " := by\n" + tail
 
 
 def reference_source(theorem: Theorem) -> str:
@@ -89,7 +123,7 @@ def _pairs(saved: object) -> list[tuple[str, dict]] | None:
         if not (isinstance(pair, list) and len(pair) == 2):
             return None
         name, result = pair
-        if not (isinstance(name, str) and isinstance(result, dict)):
+        if not (isinstance(name, str) and isinstance(result, dict) and "failureMode" in result):
             return None
         pairs.append((name, result))
     return pairs

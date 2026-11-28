@@ -84,6 +84,39 @@ def test_a_proof_only_block_is_placed_under_the_original_statement(body):
     assert assemble(T, body) == "import Mathlib\n\n" + T.statement + " := by\n  simp\n"
 
 
+BODY = "import Mathlib\n\n" + T.statement + " := by\n  intro x\n  simp\n"
+
+
+@pytest.mark.parametrize(
+    "body", ["  intro x\n  simp", "by\n  intro x\n  simp", ":= by\n  intro x\n  simp"]
+)
+def test_an_evenly_indented_proof_body_keeps_its_lines_aligned(body):
+    assert assemble(T, body) == BODY
+
+
+def test_relative_indentation_in_a_proof_body_is_kept():
+    expected = "import Mathlib\n\n" + T.statement + " := by\n  intro x\n    simp\n"
+    assert assemble(T, "intro x\n  simp") == expected
+
+
+def test_a_continuation_line_stays_under_the_tactic_it_continues():
+    expected = "import Mathlib\n\n" + T.statement + " := by\n  simp [foo]\n    <;> linarith\n"
+    assert assemble(T, "by simp [foo]\n  <;> linarith") == expected
+
+
+def test_an_indented_full_theorem_is_recognised_and_dedented():
+    indented = "\n".join("  " + line for line in FULL.splitlines())
+    assert assemble(T, indented) == "import Mathlib\n\n" + FULL + "\n"
+
+
+def test_an_empty_proof_body_ends_with_one_newline():
+    assert assemble(T, ":= by") == "import Mathlib\n\n" + T.statement + " := by\n"
+
+
+def test_an_indented_proof_body_survives_extraction():
+    assert assemble(T, extract_code(fenced("  intro x\n  simp"))) == BODY
+
+
 def test_a_theorem_with_a_longer_name_is_not_taken_for_it():
     longer = FULL.replace("fixture_add_zero", "fixture_add_zero'")
     assert assemble(T, longer).startswith("import Mathlib\n\n" + T.statement + " := by\n")
@@ -96,6 +129,11 @@ def test_the_reference_is_the_statement_closed_with_sorry():
 def test_flags_compile_time_commands_and_not_words_that_contain_them():
     assert flags('#eval IO.println "x"\nrun_cmd pure ()') == ["#eval", "run_cmd", "IO."]
     assert flags("-- elaborate the macroscopic syntaxes\nsimp") == []
+
+
+def test_flags_the_rule_and_category_commands_as_themselves():
+    code = "elab_rules : tactic\nmacro_rules\ndeclare_syntax_cat foo"
+    assert flags(code) == ["elab_rules", "macro_rules", "declare_syntax_cat"]
 
 
 def test_flags_io_only_when_it_starts_a_name():
@@ -173,6 +211,7 @@ def test_an_axiom_outside_the_allowlist_fails_even_if_the_judge_passed_it():
         [["pi_case", "x"]],
         [["pi_case", {}]],
         [["pi_case", {"failureMode": None}]],
+        [["pi_case", {"solutionInfo": {"axioms": ["propext"]}}]],
         [["pi_case", outcome(["propext"], solution=False)]],
         [["pi_case", {"failureMode": None, "solutionInfo": {"axioms": "propext"}}]],
         [["pi_case", outcome([1])]],
