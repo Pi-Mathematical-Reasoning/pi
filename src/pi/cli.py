@@ -12,6 +12,7 @@ from pi.checkpoint import CheckpointError
 from pi.config import ConfigError, load_config
 from pi.evaluation import RUN, EvaluationError, run_evaluation
 from pi.grading import grade, grader_version
+from pi.lean_project import LeanBenchmark, setup
 from pi.ollama import OllamaClient, OllamaError
 from pi.probe import run_probe, summarize
 from pi.publish import PublishError, publish_run, run_bucket
@@ -37,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         return _audit(options)
     if options.command == "publish":
         return _publish(options)
+    if options.command == "lean-setup":
+        return _lean_setup(options)
     return _report(options)
 
 
@@ -59,6 +62,17 @@ def _audit(options: argparse.Namespace) -> int:
     verdict = "audit passed" if audit["passed"] else "audit FAILED"
     print(f"{verdict}; written to {out / AUDIT}")
     return 0 if audit["passed"] else 1
+
+
+def _lean_setup(options: argparse.Namespace) -> int:
+    try:
+        benchmark = load_benchmark(options.benchmark)
+        if not isinstance(benchmark, LeanBenchmark):
+            raise BenchmarkError(f'{options.benchmark} is not a Lean benchmark (kind = "lean")')
+        setup(benchmark, options.data_dir)
+    except BenchmarkError as error:
+        return _fail(error)
+    return 0
 
 
 def _publish(options: argparse.Namespace) -> int:
@@ -236,6 +250,20 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data"),
         help="where fetched problem files are kept (default: data)",
+    )
+
+    lean_setup = commands.add_parser(
+        "lean-setup",
+        help="check out and build a Lean benchmark's project and judge at their pinned commits",
+    )
+    lean_setup.add_argument(
+        "--benchmark", required=True, type=Path, help="the Lean benchmark definition, in TOML"
+    )
+    lean_setup.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="where checkouts are kept, under lean/ (default: data)",
     )
 
     publish = commands.add_parser(

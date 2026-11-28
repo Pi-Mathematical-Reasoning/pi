@@ -451,3 +451,12 @@ def test_publish_refuses_a_run_that_was_not_audited(ollama, tmp_path, capsys, aw
 
     assert status == 1
     assert "pi audit" in capsys.readouterr().err
+
+
+def test_lean_setup_reports_a_benchmark_error_and_exits_1(tmp_path, capsys):
+    definition = tmp_path / "bad.toml"
+    definition.write_text('name = "x"\nkind = "lean"\nsurprise = 1\n')
+
+    assert main(["lean-setup", "--benchmark", str(definition), "--data-dir", str(tmp_path)]) == 1
+
+    assert capsys.readouterr().err.startswith("error: ")

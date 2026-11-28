@@ -17,8 +17,12 @@ import urllib.request
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pyarrow.parquet
+
+if TYPE_CHECKING:
+    from pi.lean_project import LeanBenchmark
 
 FORMATS = ("jsonl", "parquet")
 
@@ -56,7 +60,7 @@ class Fetched:
     warnings: list[str]
 
 
-def load_benchmark(path: Path) -> Benchmark:
+def load_benchmark(path: Path) -> "Benchmark | LeanBenchmark":
     path = Path(path)
     try:
         data = tomllib.loads(path.read_text())
@@ -64,6 +68,11 @@ def load_benchmark(path: Path) -> Benchmark:
         raise BenchmarkError(f"no benchmark definition at {path}") from None
     except tomllib.TOMLDecodeError as error:
         raise BenchmarkError(f"{path} is not valid TOML: {error}") from None
+
+    if data.get("kind") == "lean":
+        from pi.lean_project import load_lean_benchmark  # imported here: it imports this module
+
+        return load_lean_benchmark(path, data)
 
     required = ("name", "url", "sha256", "format")
     unknown = sorted(set(data) - {*required, "ids", "mirror", "scored"})

@@ -1,0 +1,15 @@
+# miniF2F's test split, as corrected by Google DeepMind: 244 theorems in Lean 4.27.
+# The scored proof benchmark. The model is never run on it before a pre-registered run.
+name = "minif2f-test"
+kind = "lean"
+repository = "https://github.com/google-deepmind/miniF2F"
+commit = "f0a20e14c1eeccd859d51bb4c2b3ee487889c303"
+file = "MiniF2F/Test.lean"
+theorems = 244
+# The file proves these two itself. pi strips the proofs; they stay in the 244.
+shipped_proofs = ["mathd_numbertheory_66", "mathd_algebra_302"]
+lean_options = ["autoImplicit=false", "relaxedAutoImplicit=false"]
+allowed_axioms = ["propext", "Classical.choice", "Quot.sound"]
+judge_repository = "https://github.com/GasStationManager/SafeVerify"
+judge_commit = "b291b588a53999a7e837dda61c7dbfe8c550c814"
+scored = true
