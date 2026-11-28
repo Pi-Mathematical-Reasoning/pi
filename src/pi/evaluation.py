@@ -391,9 +391,17 @@ def _announce(line: str) -> None:
 def _progress(position: int, total: int, result: dict) -> str:
     tokens = "-" if result["output_tokens"] is None else result["output_tokens"]
     return (
-        f"[{position}/{total}] {result['id']}  {result['verdict']}  "
+        f"[{position}/{total}] {result['id']}  {shown_verdict(result)}  "
         f"{tokens} tokens  {result['elapsed_seconds']:.1f} s"
     )
+
+
+def shown_verdict(result: dict) -> str:
+    """The verdict, and for a failed Lean result its reason: `failed (lean_error)`."""
+    lean = result.get("lean")  # only Lean results have it
+    if result["verdict"] == "failed" and isinstance(lean, dict) and lean.get("reason"):
+        return f"failed ({lean['reason']})"
+    return result["verdict"]
 
 
 def _write_results(out: Path, results: list[dict]) -> None:

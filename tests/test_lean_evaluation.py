@@ -5,9 +5,9 @@ import json
 import pytest
 
 from pi.config import LeanSettings
-from pi.evaluation import EvaluationError, read_results
+from pi.evaluation import EvaluationError, _progress, read_results
 from pi.lean_evaluation import LeanTask, lean_prompt
-from pi.lean_project import Finished, LeanBenchmark
+from pi.lean_project import BenchmarkError, Finished, LeanBenchmark
 from pi.lean_statements import Theorem
 from pi.report import build_report
 from tests.lean_fake import FakeRunner
@@ -317,3 +317,46 @@ def test_a_proof_file_left_by_an_earlier_session_is_gone_when_the_attempt_is_not
 
     assert [p.name for p in (out / "proofs").iterdir()] == ["fixture_add_zero.lean"]
     assert "stale" not in (out / "proofs" / "fixture_add_zero.lean").read_text(encoding="utf-8")
+
+
+def test_a_check_that_raises_stops_the_run_and_the_same_command_resumes_at_its_theorem(
+    ollama, tmp_path
+):
+    out = tmp_path / "run"
+    # The first theorem is proved; the second theorem's reference does not compile.
+    broken = FakeRunner(
+        compiles=[OK, OK, Finished(1, "", "Mathlib is not built", 1.0)],
+        judges=[JUDGED],
+        saved=[outcome(ONE.id)],
+    )
+
+    with pytest.raises(BenchmarkError, match="(?s)fixture_second: .*Mathlib is not built"):
+        run_lean(ollama, out, broken)
+
+    assert [r["id"] for r in read_results(out)] == ["fixture_add_zero"]
+    assert json.loads((out / "run.json").read_text())["complete"] is False
+    asked = len(chats(ollama))
+
+    run_lean(ollama, out, FakeRunner(compiles=[OK, Finished(1, "", "", 3.0)]))
+
+    results = read_results(out)
+    assert [r["id"] for r in results] == ["fixture_add_zero", "fixture_second", "fixture_third"]
+    assert [r["session"] for r in results] == [0, 1, 1]
+    assert chats(ollama)[asked][0]["content"] == lean_prompt(INSTRUCTION, TWO)
+    assert json.loads((out / "run.json").read_text())["complete"] is True
+
+
+def test_the_progress_line_of_a_failed_lean_result_gives_its_reason(ollama, tmp_path):
+    lines = []
+
+    run_lean(ollama, tmp_path / "run", mixed_runner(), report=lines.append)
+
+    verdicts = [line.split("  ")[1] for line in lines]
+    assert verdicts == ["proved", "failed (lean_error)", "missing"]
+
+
+def test_the_progress_line_of_an_answer_result_is_unchanged():
+    result = {"id": "dev/2", "verdict": "incorrect", "output_tokens": 812, "elapsed_seconds": 41.25}
+    assert _progress(2, 3, result) == "[2/3] dev/2  incorrect  812 tokens  41.2 s"
+    result = {**result, "verdict": "timed_out", "output_tokens": None}
+    assert _progress(2, 3, result) == "[2/3] dev/2  timed_out  - tokens  41.2 s"

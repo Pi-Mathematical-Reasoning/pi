@@ -18,7 +18,7 @@ from pi.lean_grading import (
     lean_grader_version,
     reference_source,
 )
-from pi.lean_project import Finished, LeanBenchmark
+from pi.lean_project import BenchmarkError, Finished, LeanBenchmark
 from pi.lean_statements import Theorem
 from tests.lean_fake import FakeRunner
 
@@ -142,6 +142,12 @@ def test_the_reference_is_the_statement_closed_with_sorry():
 def test_flags_compile_time_commands_and_not_words_that_contain_them():
     assert flags('#eval IO.println "x"\nrun_cmd pure ()') == ["#eval", "run_cmd", "IO."]
     assert flags("-- elaborate the macroscopic syntaxes\nsimp") == []
+
+
+def test_flags_the_meta_commands_and_unsafe_in_the_list_s_order():
+    code = "unsafe def f := 1\nrun_meta pure ()\nrun_elab pure ()\nrun_tac simp\nrun_cmd pure ()"
+    assert flags(code) == ["run_cmd", "run_tac", "run_elab", "run_meta", "unsafe"]
+    assert flags("simp [unsafeCast, my_unsafe, Foo.unsafe, run_tactic, run_meta']") == []
 
 
 def test_flags_the_rule_and_category_commands_as_themselves():
@@ -336,28 +342,38 @@ def test_a_compile_killed_at_its_limit_is_a_timeout():
 
 
 @pytest.mark.parametrize(
-    "done", [Finished(1, "", "boom", 1.0), Finished(0, '{"severity": "error"}\n', "", 1.0)]
+    "done",
+    [
+        Finished(1, "", "boom", 1.0),
+        Finished(0, '{"severity": "error", "data": "boom"}\n', "", 1.0),
+        Finished(None, "boom", "", 300.0),  # killed at its limit
+    ],
 )
-def test_a_reference_that_does_not_compile_is_a_judge_error(done):
+def test_a_reference_that_does_not_compile_stops_the_check_without_a_verdict(done):
     runner = FakeRunner(compiles=[done])
-    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
-    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    with pytest.raises(BenchmarkError) as raised:
+        check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    message = str(raised.value)
+    assert message.startswith("fixture_add_zero: ")
+    assert "pi's own file" in message and "boom" in message
+    assert "pi lean-setup" in message and "run the same command again" in message
     assert [call[1] for call in runner.calls] == ["Reference.lean"]
-    assert grade.submission == assemble(T, FULL)
+    assert runner.work is not None and not runner.work.exists()
 
 
-def test_a_reference_compile_that_leaves_no_olean_is_a_judge_error():
+def test_a_reference_compile_that_leaves_no_olean_stops_the_check_without_a_verdict():
     runner = FakeRunner(compiles=[OK], on_compile=lambda source, olean: olean.unlink())
-    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
-    assert grade.lean["reason"] == "judge_error"
+    with pytest.raises(BenchmarkError, match="(?s)fixture_add_zero: .*no .olean.*pi lean-setup"):
+        check(T, fenced(FULL), runner, LIMITS, ALLOWED)
     assert [call[1] for call in runner.calls] == ["Reference.lean"]
 
 
-def test_a_reference_compile_killed_at_its_limit_is_a_timeout():
-    runner = FakeRunner(compiles=[Finished(None, "", "", 300.0)])
-    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
-    assert (grade.verdict, grade.lean["reason"]) == ("failed", "check_timed_out")
-    assert len(runner.calls) == 1
+def test_the_reference_error_shows_the_end_of_lean_s_output():
+    lines = "".join(f"line {n}\n" for n in range(100))
+    runner = FakeRunner(compiles=[Finished(1, lines, "", 1.0)])
+    with pytest.raises(BenchmarkError) as raised:
+        check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert "line 99" in str(raised.value) and "line 50\n" not in str(raised.value)
 
 
 def _rewrite_reference(source, olean):
@@ -395,6 +411,27 @@ def test_a_judge_failure_fails_with_its_reason():
     grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
     assert (grade.verdict, grade.lean["reason"]) == ("failed", "sorry")
     assert grade.lean["axioms"] == ["sorryAx"]
+
+
+@pytest.mark.parametrize("saved", [PASSING, None])
+def test_a_judge_killed_by_a_signal_is_a_judge_error(saved):
+    runner = passing_runner(judges=[Finished(-9, "", "", 3.0)], saved=[saved])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert grade.lean["judge"]["exit_code"] == -9
+
+
+def test_paths_under_the_home_directory_are_written_with_a_tilde(monkeypatch):
+    home = str(Path.home())
+    missing = f"object file {home}/x/Mathlib.olean of module Mathlib does not exist\n"
+    runner = passing_runner(
+        compiles=[OK, Finished(0, '{"severity": "warning"}\n', missing, 2.0)],
+        judges=[Finished(1, "", missing, 3.0)],
+    )
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    tilde = "object file ~/x/Mathlib.olean of module Mathlib does not exist\n"
+    assert grade.lean["messages"] == '{"severity": "warning"}\n' + tilde
+    assert grade.lean["judge"]["stderr"] == tilde
 
 
 def test_saved_output_is_capped():

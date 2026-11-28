@@ -2,7 +2,8 @@
 
 A proof passes only on positive confirmation from the judge (SafeVerify): exit status 0 and a
 saved outcome that says so, for a reference compiled here that did not change before the judge
-ran. Anything unexpected, missing or unparsable is a failure with a reason. Only `check` runs
+ran. Anything unexpected, missing or unparsable is a failure with a reason. A reference that does
+not compile is no verdict at all: it is `pi`'s own file, so `check` raises. Only `check` runs
 Lean, through the runner it is given.
 """
 
@@ -15,8 +16,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from pi.lean_project import Finished, LeanBenchmark
+from pi.benchmarks import BenchmarkError
+from pi.lean_project import SETUP_HINT, Finished, LeanBenchmark
 from pi.lean_statements import Theorem
+from pi.resources import without_home
 
 LEAN_RULES_VERSION = 1
 MESSAGE_CAP = 20_000
@@ -25,6 +28,9 @@ _TAGS = {"", "lean", "lean4"}
 _FLAGGED = [
     "#eval",
     "run_cmd",
+    "run_tac",
+    "run_elab",
+    "run_meta",
     "elab",
     "elab_rules",
     "macro",
@@ -33,6 +39,7 @@ _FLAGGED = [
     "declare_syntax_cat",
     "initialize",
     "IO.",
+    "unsafe",
 ]
 _SORRY = "sorryAx"
 
@@ -222,11 +229,10 @@ def check(
     with runner.work_dir() as work:
         reference = work / "Reference.olean"
         compiled = _compile(runner, work / "Reference.lean", reference_source(theorem), limits)
-        if compiled.exit_code is None:
-            return failed("check_timed_out", compiled)
         before = _digest(reference)
         if compiled.exit_code != 0 or _has_error(compiled) or before is None:
-            return failed("judge_error", compiled)
+            # Compiled before any of the reply's code runs: the setup or the machine failed.
+            raise _reference_error(theorem, compiled, limits)
 
         compiled = _compile(runner, work / "Submission.lean", submission, limits)
         if compiled.exit_code is None:
@@ -251,6 +257,23 @@ def check(
     if reason is not None:
         return LeanGrade("failed", code, submission, record)
     return LeanGrade("proved", code, submission, record)
+
+
+def _reference_error(theorem: Theorem, compiled: Finished, limits: Limits) -> BenchmarkError:
+    if compiled.exit_code is None:
+        what = f"was killed at the {limits.compile_seconds:g}-second compile limit"
+    elif compiled.exit_code == 0 and not _has_error(compiled):
+        what = "compiled but wrote no .olean file"
+    else:
+        what = "did not compile"
+    tail = "\n".join((compiled.stdout + compiled.stderr).strip().splitlines()[-20:])
+    return BenchmarkError(
+        f"{theorem.id}: the reference, the original statement closed with `sorry`, {what}. "
+        "It is pi's own file, not the model's, so the Lean setup or the machine is at fault, "
+        "and no verdict was given. The end of Lean's output:\n"
+        f"{tail or '(nothing)'}\n"
+        f"Fix the setup ({SETUP_HINT}) and run the same command again."
+    )
 
 
 def _compile(runner, source: Path, text: str, limits: Limits) -> Finished:
@@ -293,18 +316,21 @@ def _record(
     saved: object = None,
     axioms: Sequence[str] = (),
 ) -> dict:
-    """The record's `lean` field: the last compile that ran, and the judge if it ran."""
+    """The record's `lean` field: the submission's compile, and the judge if it ran.
+
+    The home directory in Lean's and the judge's output is written as ~, for a public record.
+    """
     judge = None
     if judged is not None:
         judge = {
             "exit_code": judged.exit_code,
             "outcome": saved,
-            "stderr": judged.stderr[:MESSAGE_CAP],
+            "stderr": without_home(judged.stderr)[:MESSAGE_CAP],
         }
     return {
         "reason": reason,
         "exit_code": compiled.exit_code,
-        "messages": (compiled.stdout + compiled.stderr)[:MESSAGE_CAP],
+        "messages": without_home(compiled.stdout + compiled.stderr)[:MESSAGE_CAP],
         "judge": judge,
         "axioms": list(axioms),
         "flags": flags(code),
