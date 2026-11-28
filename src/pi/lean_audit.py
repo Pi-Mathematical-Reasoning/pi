@@ -26,7 +26,7 @@ from pi.revision import code_revision
 # How many offending theorems a check names before it says "and N more".
 _SHOWN = 5
 # A result is checked again with this many times the limits the run was made under, so a check
-# that finished within a limit in the run cannot reach it on a busier machine.
+# that finished within a limit in the run has room to finish again on a busier machine.
 _FACTOR = 4
 # The checks `verdicts` rests on: when one failed, the long re-check is not run.
 _PREREQUISITES = ("benchmark", "lean environment", "grader", "one result per problem")

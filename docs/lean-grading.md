@@ -134,11 +134,32 @@ directory, removed when the check ends. When a process ends, `pi` kills
 every process in its process group, so nothing it started in the usual way
 outlives it.
 
+**One check at a time.** One judge run peaks near 25 GB of memory, so only
+one check runs on a machine at a time, and a lock enforces it. A check holds
+an exclusive lock on `<data dir>/lean/work/.lock` (`data/lean/work/.lock` by
+default) from before it makes its work directory until after it removes it.
+A check that finds the lock held does not run: it stops with an error saying
+that another Lean check is running, and gives no verdict. The lock is
+released when the check ends, however it ends, and when its process dies, so
+a crash leaves nothing to clear. Every command that checks a proof (`pi eval`,
+`pi audit`, `pi lean-check` and the real-Lean tests) takes it.
+
 **The reference.** Before the submission, `pi` compiles a reference file
 itself: the header and the original statement closed with `sorry`. It never
-comes from the reply. `pi` takes the SHA-256 of the compiled reference after
-its compile, again after the submission's compile, and again after the judge.
-If it has changed, the check fails as `judge_error`.
+comes from the reply, and it is compiled before any of the reply's code runs.
+The reference compile must finish within the compile limit, exit with status
+0, print no message of severity `error`, and write `Reference.olean`. If it
+does not, the check gives **no verdict**: the reference is `pi`'s own file,
+so the Lean setup or the machine is at fault, not the model. `pi` stops with
+an error that names the theorem, shows the end of Lean's output and says to
+fix the setup (`pi lean-setup`) and run the same command again. In a run
+nothing is recorded for that theorem, and the same command resumes the run
+at it; in an audit, the audit stops.
+
+Once the reference has compiled, `pi` takes the SHA-256 of the compiled
+reference, again after the submission's compile, and again after the judge.
+If it has changed, the check fails as `judge_error`: the submission's code
+had run by then, so it may have caused the change.
 
 **Step 1: compile.** `lake env lean --json` compiles the submission with the
 benchmark's Lean options (for `minif2f-test`, `autoImplicit=false` and
@@ -155,11 +176,10 @@ depends on. It saves its outcome to a file, `judge.json`, and writes its
 progress to standard error. `pi` refuses anything already at the path of
 `judge.json` before the judge runs: that check fails as `judge_error`.
 
-**A pass.** A result is `proved` when, and only when, code was found and all
-of these hold:
+**A pass.** A check gives a verdict only once the reference has compiled, as
+above. A result is `proved` when, and only when, code was found, the
+reference compiled, and all of these hold:
 
-- the reference compile finished within its limit, exited with status 0,
-  printed no message of severity `error`, and wrote `Reference.olean`;
 - the submission compile finished within its limit, exited with status 0 and
   printed no message of severity `error`;
 - the compiled reference has the same SHA-256 after the submission's compile
@@ -211,32 +231,60 @@ real Lean and judge, and the tests in
 | `statement_changed` | The judge did not find the theorem with the original statement | `weakened`: `a + 0 ≤ b + 1` for `a + 0 ≤ b`. `fake_success_exit`: `#exit` before the theorem, so it is absent |
 | `axioms` | The proof, or a declaration in the file, depends on an axiom outside the allowlist | `helper_axiom`: `axiom pi_helper` declared and used |
 | `kernel_rejected` | The judge's kernel replay rejected a declaration | `add_false_env`: a declaration added to the file without the kernel checking it. `replace_axiom`: an imported axiom replaced. `native_decide` |
-| `check_timed_out` | The reference compile, the submission compile or the judge was killed at its limit | A proof body that runs `sleep 120000`, with 30-second limits |
-| `judge_error` | Anything else: the grader, not the proof, failed | The judge exits 0 and saves no outcome; the reference does not compile; the reference changes during the check |
+| `check_timed_out` | The submission compile or the judge was killed at its limit | A proof body that runs `sleep 120000`, with 30-second limits |
+| `judge_error` | The judge gave no usable verdict, or refused the submission for a reason that has no label of its own | The judge exits 0 and saves no outcome; the judge refuses an `unsafe` definition; the judge is killed by a signal; the reference changes during the check |
 
-The reasons are decided in this order, and the first that applies is given:
+The reference compile gives no reason: if it fails, there is no verdict
+(see [the reference](#checking-the-file)). Once it has compiled, the reasons
+are decided in this order, and the first that applies is given:
 
-1. The reference compile was killed at its limit: `check_timed_out`. It
-   failed, or wrote no `.olean`: `judge_error`.
-2. The submission compile was killed at its limit: `check_timed_out`. It
+1. The submission compile was killed at its limit: `check_timed_out`. It
    failed: `lean_error`.
-3. The reference changed during the submission's compile, the submission
+2. The reference changed during the submission's compile, the submission
    wrote no `.olean`, or `judge.json` already exists: `judge_error`.
-4. The judge was killed at its limit: `check_timed_out`.
-5. The judge's standard error contains `uncaught exception: (kernel)` or
+3. The judge was killed at its limit: `check_timed_out`.
+4. The judge's standard error contains `uncaught exception: (kernel)` or
    `kernel verification failed`: `kernel_rejected`.
-6. A pair's failure mode is `thmType` (the statement differs), `notFound` (no
+5. A pair's failure mode is `thmType` (the statement differs), `notFound` (no
    such theorem), or an object, which is how the judge reports a declaration
    of another kind: `statement_changed`.
-7. A pair's failure mode is `axioms`, or a line of the judge's standard error
+6. A pair's failure mode is `axioms`, or a line of the judge's standard error
    says a declaration `used disallowed axioms`: `sorry` if `sorryAx` is among
    the axioms those pairs list or in one of those lines, otherwise `axioms`.
-8. The conditions for a pass hold except that an axiom is off the allowlist:
+7. The conditions for a pass hold except that an axiom is off the allowlist:
    `axioms`.
-9. Anything else that is not a pass: `judge_error`.
+8. Anything else that is not a pass: `judge_error`.
 
-Whatever the outcome of steps 4 to 9, a reference that changed while the
+Whatever the outcome of steps 3 to 8, a reference that changed while the
 judge ran makes the result `judge_error`.
+
+**What `judge_error` covers.** It means the judge gave no usable verdict, or
+refused the submission for a reason that has no label of its own. These are
+the cases that reach it:
+
+- the compiled reference changed, or disappeared, during the submission's
+  compile or while the judge ran;
+- the submission compile succeeded but wrote no `Submission.olean`;
+- something was already at the path of `judge.json` before the judge ran;
+- the judge exited with status 0 but saved no outcome, or one that is not
+  JSON, or not a non-empty list of name and outcome pairs, or names no pair
+  after the theorem, or gives a failure mode the rules do not know, or lacks
+  a list of axioms;
+- the judge refused the submission for a reason of its own, without saving
+  an outcome or printing a message the earlier steps read. It refuses an
+  `unsafe` definition (`unsafe constant … detected`). It also refuses a
+  `partial` one, but only when asked to with `--disallow-partial`, which
+  `pi` does not pass, so a `partial` definition is not refused today. It
+  refuses a submission that does not import everything the reference
+  imports, and a numeric literal that looks corrupted;
+- the judge died by a signal (a negative exit status), for example when the
+  system killed it for its memory;
+- the judge exited with a status other than 0 and no earlier step applies.
+
+These stay verdicts, because a submission can cause each of them and a reply
+must never be able to stop a run. But `judge_error` can also mean the judge
+or the machine failed, so **a run holding any `judge_error` result needs a
+person to look at it before it is published.**
 
 ## The axiom allowlist
 
@@ -250,8 +298,10 @@ lemma brings in.
 The limits that bind are wall-clock: one for the compile step and one for the
 judge, set in the `[lean]` section of the run configuration
 (`compile_time_limit_seconds` and `judge_time_limit_seconds`). The reference
-compile and the submission compile each get the compile limit. A step that
-reaches its limit is killed, and the result is `check_timed_out`.
+compile and the submission compile each get the compile limit. A submission
+compile or judge that reaches its limit is killed, and the result is
+`check_timed_out`. A reference compile that reaches it is killed too, and the
+check gives no verdict, as [above](#checking-the-file).
 
 `pi` does not set Lean's own per-declaration budget, `maxHeartbeats`: the
 benchmark's Lean options are the only ones passed, and a proof may raise it
@@ -312,13 +362,19 @@ An accepted proof whose block contains any of these is flagged in its record
 and listed in the report for a person to read. It is not rejected for that
 alone.
 
-`#eval`, `run_cmd`, `elab`, `elab_rules`, `macro`, `macro_rules`, `syntax`,
-`declare_syntax_cat`, `initialize`, `IO.`
+These are the fourteen, in the order a record lists them:
+
+`#eval`, `run_cmd`, `run_tac`, `run_elab`, `run_meta`, `elab`, `elab_rules`,
+`macro`, `macro_rules`, `syntax`, `declare_syntax_cat`, `initialize`, `IO.`,
+`unsafe`
 
 Each is matched as a whole word anywhere in the block, comments and strings
-included, so `elab` does not match `elaborate`, and `IO.` matches only at the
-start of a name, not in `MyIO.x`. Every result with code records its flags;
-the report lists only the accepted ones.
+included: not preceded by a letter, digit, `_`, `.` or `'`, and not followed
+by a letter, digit, `_` or `'`. So `elab` does not match `elaborate`, and
+`unsafe` does not match `unsafeCast` or `Foo.unsafe`. `IO.` matches only at
+the start of a name, so not in `MyIO.x` or `Foo.IO.x`, and anything may
+follow its dot. Every result with code records its flags; the report lists
+only the accepted ones.
 
 ## The grader
 

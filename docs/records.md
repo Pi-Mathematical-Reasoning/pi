@@ -76,9 +76,9 @@ fields directly after `metrics` and before `discarded_attempts`:
 | Key | Meaning |
 | --- | --- |
 | `reason` | Why the check failed: `lean_error`, `sorry`, `statement_changed`, `axioms`, `kernel_rejected`, `check_timed_out` or `judge_error`. Null when `proved` |
-| `exit_code` | The exit status of the last compile that ran: the submission's, or the reference's when the reference compile failed or timed out. Null if it was killed at its limit |
-| `messages` | That compile's standard output, then its standard error, cut to the first 20,000 characters. Lean writes one JSON message per line to standard output |
-| `judge` | Null if the judge did not run. Otherwise its `exit_code` (null if killed at its limit), its saved `outcome` (the parsed `judge.json`, or null if it saved none that could be read) and its `stderr` (the first 20,000 characters) |
+| `exit_code` | The exit status of the submission's compile. Null if it was killed at its limit. A reference that fails to compile gives no result at all ([Lean rules](lean-grading.md#checking-the-file)) |
+| `messages` | That compile's standard output, then its standard error, with the home directory written as `~`, cut to the first 20,000 characters. Lean writes one JSON message per line to standard output |
+| `judge` | Null if the judge did not run. Otherwise its `exit_code` (null if killed at its limit, negative if a signal killed it), its saved `outcome` (the parsed `judge.json`, or null if it saved none that could be read) and its `stderr` (with the home directory written as `~`, then cut to the first 20,000 characters) |
 | `axioms` | The axioms the judge's saved outcome lists for the theorem itself. Empty if it lists none |
 | `flags` | The compile-time commands found in the block, from the list in the [Lean rules](lean-grading.md#the-known-limit). Recorded whatever the verdict |
 | `compile_seconds` | Wall-clock seconds of that compile |
@@ -106,4 +106,29 @@ published to the bucket with the run and never committed; they can also be
 rebuilt from `results.jsonl` and the pinned benchmark. For a Lean run,
 `audit.json` covers each file in `proofs/` as well as `run.json`,
 `results.jsonl` and `report.md`, and `pi publish` uploads exactly the files
-the audit names.
+the audit names. Anything else in `proofs/`, such as a Finder `.DS_Store` or
+an editor's backup, fails the audit's `proof files` check, and `pi publish`
+refuses it; both name the entry and say to remove it.
+
+The report of a Lean run labels its memory row `Peak memory (model)`: like
+the answer report's `Peak memory`, it is measured over Ollama's server and
+the processes it launches, so Lean and the judge are not in it.
+
+### The audit of a Lean run
+
+`audit.json` for a Lean run records its checks in this order: `complete`,
+`benchmark`, `lean environment`, `one result per problem`, `grader`,
+`proof files`, `sessions`, `scored standard` (scored runs only), `report`,
+then `verdicts`, the one that runs Lean. When `benchmark`,
+`lean environment`, `grader` or `one result per problem` failed, `verdicts`
+is not run: it is recorded as failed with the detail
+`not run: an earlier check failed`.
+
+`verdicts` grades each saved reply again. A `proved` or `failed` result is
+checked again with Lean at four times both of the run's limits, so a check
+that finished within a limit in the run has room to finish again on a busier
+machine; it must give the same verdict, the same reason, and the same axioms, in any
+order. A result that failed with `check_timed_out` is not checked again, but
+the recorded time of the step that timed out must reach that step's limit in
+the run. `pi audit` prints a line as each result is checked again, such as
+`[12/244] <id>  proved  re-checked in 41.2 s`, before the checks.
