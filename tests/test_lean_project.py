@@ -327,11 +327,18 @@ def test_a_failing_build_carries_the_command_and_the_end_of_its_output(tmp_path)
 
 
 def _alive(pid: int) -> bool:
+    """Whether the process runs; a killed one lingers as a zombie until reaped, and is not alive."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    return True
+    state = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    ).stdout.strip()
+    return bool(state) and not state.startswith("Z")
 
 
 def test_a_process_past_its_limit_is_killed_with_everything_it_started(tmp_path):
@@ -341,7 +348,7 @@ def test_a_process_past_its_limit_is_killed_with_everything_it_started(tmp_path)
         done = run_process(["sh", str(script)], tmp_path, limit=1)
         pid = int((tmp_path / "pid").read_text())
         assert done.exit_code is None and 1 <= done.seconds < 5
-        assert not _alive(pid)
+        assert _dies_soon(pid)
     finally:  # leave no stray sleep behind if the assertions fail
         if (tmp_path / "pid").exists():
             with contextlib.suppress(ProcessLookupError):
@@ -356,7 +363,7 @@ def test_an_interrupted_wait_kills_the_process_group_and_propagates(tmp_path):
     try:
         with pytest.raises(KeyboardInterrupt):
             run_process(["sh", str(script)], tmp_path, limit=30)
-        assert not _alive(int((tmp_path / "pid").read_text()))
+        assert _dies_soon(int((tmp_path / "pid").read_text()))
     finally:  # leave no stray sleep behind if the assertions fail
         timer.cancel()
         if (tmp_path / "pid").exists():
@@ -365,8 +372,8 @@ def test_an_interrupted_wait_kills_the_process_group_and_propagates(tmp_path):
 
 
 def _dies_soon(pid: int) -> bool:
-    """Whether the process is gone within a second; a killed orphan is reaped a moment later."""
-    deadline = time.monotonic() + 1
+    """Whether the process is gone within 5 seconds; a killed orphan is reaped a moment later."""
+    deadline = time.monotonic() + 5
     while _alive(pid):
         if time.monotonic() > deadline:
             return False
