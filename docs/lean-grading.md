@@ -138,19 +138,23 @@ outlives it.
 one check runs on a machine at a time, and a lock enforces it. A check holds
 an exclusive lock on `<data dir>/lean/work/.lock` (`data/lean/work/.lock` by
 default) from before it makes its work directory until after it removes it.
-A check that finds the lock held does not run: it stops with an error saying
-that another Lean check is running, and gives no verdict. The lock is
-released when the check ends, however it ends, and when its process dies, so
-a crash leaves nothing to clear. Every command that checks a proof (`pi eval`,
-`pi audit`, `pi lean-check` and the real-Lean tests) takes it.
+A check that finds the lock held prints
+`waiting for another Lean check on this machine to finish` to standard
+error, once, and waits until the lock is free; there is no refusal and no
+time limit on the wait. The wait ends, because the check holding the lock is
+bounded by its limits, and the lock is released when that check ends,
+however it ends, and when its process dies, so a crash leaves nothing to
+clear. Every command that checks a proof (`pi eval`, `pi audit`,
+`pi lean-check` and the real-Lean tests) takes it.
 
 **The reference.** Before the submission, `pi` compiles a reference file
 itself: the header and the original statement closed with `sorry`. It never
 comes from the reply, and it is compiled before any of the reply's code runs.
 The reference compile must finish within the compile limit, exit with status
-0, print no message of severity `error`, and write `Reference.olean`. If it
-does not, the check gives **no verdict**: the reference is `pi`'s own file,
-so the Lean setup or the machine is at fault, not the model. `pi` stops with
+0, print no message of severity `error`, and write a `Reference.olean` that
+can be read. If it does not, the check gives **no verdict**: the reference
+is `pi`'s own file, so the Lean setup or the machine is at fault, not the
+model. `pi` stops with
 an error that names the theorem, shows the end of Lean's output and says to
 fix the setup (`pi lean-setup`) and run the same command again. In a run
 nothing is recorded for that theorem, and the same command resumes the run
@@ -158,8 +162,10 @@ at it; in an audit, the audit stops.
 
 Once the reference has compiled, `pi` takes the SHA-256 of the compiled
 reference, again after the submission's compile, and again after the judge.
-If it has changed, the check fails as `judge_error`: the submission's code
-had run by then, so it may have caused the change.
+If it has changed, or can no longer be read as a file (it was removed,
+replaced by a directory or made unreadable), the check fails as
+`judge_error`: the submission's code had run by then, so it may have caused
+the change.
 
 **Step 1: compile.** `lake env lean --json` compiles the submission with the
 benchmark's Lean options (for `minif2f-test`, `autoImplicit=false` and
@@ -262,8 +268,8 @@ judge ran makes the result `judge_error`.
 refused the submission for a reason that has no label of its own. These are
 the cases that reach it:
 
-- the compiled reference changed, or disappeared, during the submission's
-  compile or while the judge ran;
+- the compiled reference changed, disappeared or could no longer be read,
+  during the submission's compile or while the judge ran;
 - the submission compile succeeded but wrote no `Submission.olean`;
 - something was already at the path of `judge.json` before the judge ran;
 - the judge exited with status 0 but saved no outcome, or one that is not

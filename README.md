@@ -91,7 +91,9 @@ uv run pi report runs/dev
 `pi eval` attempts every problem once, from a fresh load of the model, and
 sends it only the problem text. Each result is saved as it finishes. If the
 run stops for any reason, the same command resumes it at the first problem
-with no result. It refuses to continue if the checkpoint, the settings, the
+with no result. Every `pi` command stops on SIGTERM and SIGHUP as it does on
+Ctrl-C, so `kill` stops a run cleanly and `pi eval` says how to resume. It
+refuses to continue if the checkpoint, the settings, the
 problems or the grader have changed since the run began.
 
 A run directory holds two files. `run.json` says what was run and whether it
@@ -196,8 +198,8 @@ It needs:
   `~/.elan`.
 - **Memory:** one judge run peaks near 25 GB, so checks run one at a time and
   the model is unloaded before each. A lock enforces it: each check holds
-  `data/lean/work/.lock`, and a command that would start a second check
-  while one runs stops with an error instead.
+  `data/lean/work/.lock`, and a check that finds it held prints
+  `waiting for another Lean check on this machine to finish` and waits.
 
 ```sh
 brew install elan-init
@@ -243,8 +245,8 @@ If the reference file `pi` builds for a theorem, its statement closed with
 `sorry`, does not compile, the run stops with no result for that theorem: the
 setup or the machine is at fault, not the model. Fix the setup, with
 `pi lean-setup` if need be, and run the same command again to resume at that
-theorem. `pi` stops on SIGTERM and SIGHUP as it does on Ctrl-C: it kills the
-Lean or judge processes it started, and `pi eval` says how to resume.
+theorem. A Lean check that SIGTERM, SIGHUP or Ctrl-C stops kills the Lean or
+judge processes it started.
 
 A Lean run and its audit need no AWS credentials, so make them in a shell
 that has none: the compile step runs code the model wrote. Only `pi publish`
@@ -288,8 +290,8 @@ PI_LEAN_TESTS=1 uv run pytest tests/test_lean_real.py
 ```
 
 Never run two Lean checks at once, a test run included: each judge run needs
-about 25 GB. The lock refuses a second check, so a test run started during a
-run stops one of them with an error.
+about 25 GB. The lock makes a second check wait for the first, so a test
+run started during a run makes one of them wait at each check.
 
 ## Cloud resources
 

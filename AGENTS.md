@@ -79,14 +79,16 @@ the brief, [PI_PROJECT.md](PI_PROJECT.md).
   They need `uv run pi lean-setup --benchmark benchmarks/minif2f-test.toml`
   first and take about a quarter of an hour. One judge run peaks near 25 GB
   of memory, so never run two Lean checks at once. A lock on
-  `data/lean/work/.lock` enforces it: a second `pi eval`, `pi audit`,
-  `pi lean-check` or real-Lean test run started while a check runs stops
-  with an error rather than wait.
+  `data/lean/work/.lock` enforces it: when a second `pi eval`, `pi audit`,
+  `pi lean-check` or real-Lean test run reaches a check while another check
+  runs, it prints `waiting for another Lean check on this machine to finish`
+  to standard error and waits. The two checks never run together, but the
+  waiting command is held up, so still do not start one during a run.
 - **Make Lean runs and audits in a shell without AWS credentials.** They need
   none, and the compile step runs code the model wrote. Only `pi publish`
-  needs them. `pi` stops on SIGTERM and SIGHUP as on Ctrl-C, killing the Lean
-  processes it started, so a run can be stopped with `kill` and resumed with
-  the same command.
+  needs them. Every `pi` command stops on SIGTERM and SIGHUP as on Ctrl-C,
+  killing any Lean processes it started, so a run of either kind can be
+  stopped with `kill` and resumed with the same command.
 - **A Lean run's audit is long and comes last.** `pi audit` checks the
   records first and grades every saved reply again with Lean last, at four
   times the run's limits, printing a line per result as it goes; it skips

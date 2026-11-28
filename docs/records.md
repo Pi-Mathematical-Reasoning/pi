@@ -131,4 +131,7 @@ machine; it must give the same verdict, the same reason, and the same axioms, in
 order. A result that failed with `check_timed_out` is not checked again, but
 the recorded time of the step that timed out must reach that step's limit in
 the run. `pi audit` prints a line as each result is checked again, such as
-`[12/244] <id>  proved  re-checked in 41.2 s`, before the checks.
+`[12/244] <id>  proved  re-checked in 41.2 s`, before the checks. Each
+re-check takes the machine's Lean lock, `data/lean/work/.lock`, as a run's
+checks do: if another check holds it, the audit prints
+`waiting for another Lean check on this machine to finish` and waits.
