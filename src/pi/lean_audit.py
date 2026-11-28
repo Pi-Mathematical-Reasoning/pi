@@ -14,7 +14,7 @@ from pathlib import Path
 from pi.audit import REPORT, _scored_problems, fingerprint
 from pi.evaluation import RESULTS, RUN, read_results
 from pi.lean_evaluation import PROOFS
-from pi.lean_grading import Limits, assemble, check, extract_code, lean_grader_version
+from pi.lean_grading import Limits, assemble, check, extract_code, flags, lean_grader_version
 from pi.lean_project import LeanBenchmark, LeanRunner, lean_environment, load_theorems
 from pi.lean_statements import Theorem
 from pi.report import build_report
@@ -52,7 +52,7 @@ def audit_lean_run(out: Path, benchmark: LeanBenchmark, data_dir: Path, runner=N
         checks.append({"name": name, "passed": not found, "detail": detail})
 
     record("complete", lambda: [] if run.get("complete") else ["the run is not marked complete"])
-    record("benchmark", lambda: _benchmark_problems(run, benchmark, theorems))
+    record("benchmark", lambda: _benchmark_problems(run, benchmark, theorems, environment))
     record("lean environment", lambda: _environment_problems(run, environment))
     record("one result per problem", lambda: _result_count_problems(results, theorems))
     current = lean_grader_version(benchmark)
@@ -76,9 +76,16 @@ def audit_lean_run(out: Path, benchmark: LeanBenchmark, data_dir: Path, runner=N
     }
 
 
-def _benchmark_problems(run: dict, benchmark: LeanBenchmark, theorems: list[Theorem]) -> list[str]:
+def _benchmark_problems(
+    run: dict, benchmark: LeanBenchmark, theorems: list[Theorem], environment: dict
+) -> list[str]:
     recorded = run["benchmark"]
     wanted = (
+        ("kind", "lean"),
+        ("name", benchmark.name),
+        ("subset", benchmark.ids is not None),
+        ("scored", benchmark.scored),
+        ("sha256", environment["files"][benchmark.file]),
         ("repository", benchmark.repository),
         ("commit", benchmark.commit),
         ("file", benchmark.file),
@@ -180,19 +187,31 @@ def _verdict_follows(
         return _ungraded(result, "missing")
     if result["proof"] != code or not isinstance(result["lean"], dict):
         return False
+    recorded = result["lean"]
+    if recorded["flags"] != flags(code):
+        return False
     verdict = result["verdict"]
     if verdict == "proved":
         stricter = Limits(
             limits.compile_seconds * _PROVED_FACTOR, limits.judge_seconds * _PROVED_FACTOR
         )
-        return _graded(theorem, response, runner, stricter, benchmark).verdict == "proved"
+        again = _graded(theorem, response, runner, stricter, benchmark)
+        return (
+            again.verdict == "proved"
+            and recorded["reason"] is None
+            and recorded["axioms"] == again.lean["axioms"]
+        )
     if verdict != "failed":
         return False
-    reason = result["lean"]["reason"]
+    reason = recorded["reason"]
     if reason == "check_timed_out":
-        return _ran_to_the_limit(result["lean"], limits)
+        return _ran_to_the_limit(recorded, limits)
     again = _graded(theorem, response, runner, limits, benchmark)
-    return again.verdict == "failed" and again.lean["reason"] == reason
+    return (
+        again.verdict == "failed"
+        and again.lean["reason"] == reason
+        and recorded["axioms"] == again.lean["axioms"]
+    )
 
 
 def _ungraded(result: dict, verdict: str) -> bool:
@@ -204,10 +223,13 @@ def _graded(theorem: Theorem, response: dict, runner, limits: Limits, benchmark:
 
 
 def _ran_to_the_limit(lean: dict, limits: Limits) -> bool:
-    """Whether a timed-out check's recorded time reached the limit of the step it timed out in."""
-    return _at_least(lean["compile_seconds"], limits.compile_seconds) or _at_least(
-        lean["judge_seconds"], limits.judge_seconds
-    )
+    """Whether the time of the step that timed out reached that step's limit.
+
+    The judge did not run when `judge_seconds` is None, so the compile timed out.
+    """
+    if lean["judge_seconds"] is None:
+        return _at_least(lean["compile_seconds"], limits.compile_seconds)
+    return _at_least(lean["judge_seconds"], limits.judge_seconds)
 
 
 def _at_least(seconds: object, limit: float) -> bool:

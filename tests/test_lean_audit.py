@@ -437,3 +437,82 @@ def test_lean_not_set_up_stops_the_audit_with_the_error(finished, monkeypatch):
 
     with pytest.raises(BenchmarkError, match="pi lean-setup"):
         audit(finished)
+
+
+@pytest.mark.parametrize(
+    ("index", "field", "value"),
+    [
+        (0, "flags", ["#eval"]),  # a flag added to a proved result
+        (0, "reason", "lean_error"),
+        (0, "axioms", ["sorryAx"]),
+        (1, "flags", ["#eval"]),  # other flags on a failed result
+        (1, "axioms", ["propext"]),
+    ],
+)
+def test_a_recorded_lean_field_that_the_reply_does_not_give_fails(finished, index, field, value):
+    edit_results(finished, lambda r: r[index]["lean"].update({field: value}))
+
+    result = audit(finished)
+
+    assert "verdicts" in failed(result)
+    assert ["fixture_add_zero", "fixture_second"][index] in detail(result, "verdicts")
+
+
+def test_flags_emptied_from_a_flagged_proof_fail(ollama, tmp_path):
+    ollama.replies[lean_prompt(INSTRUCTION, ONE)] = {
+        "content": (
+            "```lean4\ntheorem fixture_add_zero (a : ℕ) : a + 0 = a := by\n  #eval 1\n  simp\n```\n"
+        )
+    }
+    out = tmp_path / "run"
+    runner = making_runner()
+    run_lean(ollama, out, runner, task=task_for(out, runner, settings=SETTINGS))
+    (out / "report.md").write_text(build_report(out))
+    assert read_results(out)[0]["lean"]["flags"] == ["#eval"]
+    assert failed(audit(out)) == []
+
+    edit_results(out, lambda r: r[0]["lean"].update(flags=[]))
+
+    runner = FakeRunner(compiles=[OK, LEAN_ERROR])  # only the failed theorem reaches Lean
+    assert detail(audit(out, runner), "verdicts") == "fixture_add_zero"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("kind", "answer"),
+        ("name", "other"),
+        ("subset", True),
+        ("scored", True),
+        ("sha256", "cd" * 32),
+    ],
+)
+def test_a_benchmark_identity_that_differs_from_the_definition_fails(finished, field, value):
+    edit_run(finished, lambda run: run["benchmark"].update({field: value}), rebuild=False)
+
+    assert "benchmark" in failed(audit(finished))
+
+
+@pytest.mark.parametrize(
+    ("compile_seconds", "judge_seconds", "passes"),
+    [
+        (300.0, None, True),  # the compile timed out
+        (12.0, None, False),
+        (12.0, 700.0, True),  # the judge ran and timed out
+        (5.0, 600.0, True),  # the judge timed out
+        (400.0, 12.0, False),  # the judge ran, so its time is the one that must reach its limit
+        (None, None, False),
+        (5.0, "long", False),
+        (None, 700.0, True),
+    ],
+)
+def test_a_timed_out_check_s_time_is_that_of_the_step_that_timed_out(
+    timed_out, compile_seconds, judge_seconds, passes
+):
+    def record(results):
+        results[1]["lean"].update(compile_seconds=compile_seconds, judge_seconds=judge_seconds)
+
+    edit_results(timed_out, record, rebuild=False)  # the report cannot be rebuilt from nulls
+    runner = FakeRunner(compiles=[OK, OK], judges=[JUDGED], saved=[outcome(ONE.id)])
+
+    assert ("verdicts" not in failed(audit(timed_out, runner))) is passes
