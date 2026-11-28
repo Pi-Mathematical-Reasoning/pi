@@ -18,12 +18,14 @@ a proof that appears there and not in the reply does not count.
 
 ## Finding the code
 
-The code is the content of the **last closed code block** in the reply that
-is tagged `lean`, `lean4` or not tagged at all (in any letter case), and that
-holds something other than blank lines. A block in another language is
-skipped. A line that starts with three backticks, after any spaces, opens a
-block, or closes the open one whatever follows the backticks, so a fence that
-is never closed holds no code. A reply with no such block is `missing`.
+The code is the content of the **last closed code block** in the reply whose
+tag is `lean` or `lean4` (in any letter case) or empty, and that holds
+something other than blank lines. The tag is the whole of what follows the
+opening backticks, with spaces at either end ignored, so it must be exactly
+one of those: a block tagged `python`, or `lean title=x`, is skipped. A line
+that starts with three backticks, after any spaces, opens a block, or closes
+the open one whatever follows the backticks, so a fence that is never closed
+holds no code. A reply with no such block is `missing`.
 
 | Reply | Code taken |
 | --- | --- |
@@ -31,6 +33,7 @@ is never closed holds no code. A reply with no such block is `missing`.
 | An untagged block | That block |
 | A `lean4` block, then a `python` block and a `text` block | The `lean4` block; the others are skipped |
 | A `Lean4` block | That block: the tag's letter case does not matter |
+| A block tagged `lean title=x` | None from it: the tag is not exactly `lean` |
 | A `lean4` fence opened and never closed | None: `missing` |
 | A `lean4` block holding only spaces | None: `missing` |
 | No code block at all | None: `missing` |
@@ -41,24 +44,48 @@ The code is turned into one Lean file, the submission, by four rules:
 
 1. **The benchmark's header comes first**: the `import` and `open` lines at
    the top of the benchmark file, then a blank line.
-2. **The block is tidied, and only so far.** Blank lines at its start and end
-   are removed; the spaces inside a code line are never touched. The `import`
-   lines at its start, and the blank lines among and after them, are
-   dropped, since the header supplies the imports; every later line, an
-   `open` line included, is kept. The block is then dedented as a whole.
+2. **The block is tidied, and only so far.** Lines holding only whitespace
+   at its start and end are removed. The lines at its start that begin with
+   `import ` (after any spaces), and the blank lines among and after them,
+   are dropped, since the header supplies the imports; every later line, an
+   `open` line included, is kept. The block is then dedented as a whole: the
+   leading whitespace that all its non-blank lines share is removed, and a
+   line holding only whitespace becomes empty. Nothing else in a line is
+   changed here; rule 4 changes the first line of a proof body.
 3. **A block that declares the theorem under its original name is used as it
-   stands**, after the header. It declares it when a line starts with
-   `theorem` or `lemma` followed by the theorem's exact name. Helper lemmas
-   and any other commands in the block stay where they are.
-4. **Any other block is a proof body.** It is placed under the original
-   statement, which is followed by ` := by`. On its first line a leading `:=`,
-   then a leading `by`, are removed. The lines are dedented together and
-   indented by two spaces, so their indentation relative to each other is
-   kept.
+   stands**, after the header: the tidied block, then a newline. It declares
+   the theorem when some line of the tidied block begins, with nothing before
+   it, with `theorem` or `lemma`, then whitespace, then the theorem's exact
+   name, followed by none of a letter, digit, `_`, `.`, `'`, `!` or `?`.
+   Helper lemmas and any other commands in the block stay where they are. A
+   declaration with anything before the keyword does not count, so
+   `@[simp] theorem …`, `private theorem …`, or a theorem indented inside a
+   `namespace`, makes the block a proof body.
+4. **Any other block is a proof body**, built from the tidied block in these
+   steps:
+   1. All leading whitespace is removed from its first line.
+   2. If that line then starts with `:=`, the `:=` and the whitespace after
+      it are removed.
+   3. If it then starts with the word `by`, the `by` and the whitespace after
+      it are removed. (`by_cases` is not the word `by`.)
+   4. If nothing is left of the first line, it is dropped.
+   5. The lines, the first one if kept and all the others, are dedented
+      together, as in rule 2.
+   6. Every non-blank line is indented by two spaces; empty lines stay empty.
+   7. The file is the header, a blank line, the original statement followed
+      by ` := by`, then those lines (none, if nothing is left of the block),
+      each ending in a newline.
 
-For a theorem whose header is `import Mathlib` and whose statement is
-`theorem fixture_add_zero (a : ℕ) : a + 0 = a`, an original statement from
-`tests/lean_fixture/Split.lean`:
+   So the lines after the first keep their indentation relative to each
+   other. When the first line keeps code, they also keep their indentation
+   relative to the block's left edge, and the first line's own indentation
+   is lost; when it is dropped, they are dedented together.
+
+The examples use the statement
+`theorem fixture_add_zero (a : ℕ) : a + 0 = a`, an original theorem from
+`tests/lean_fixture/Split.lean`. That file's header also has two
+`open scoped` lines; the examples use a shorter header, `import Mathlib`
+alone, as the unit tests do.
 
 | Block | Taken as | Lines after the header |
 | --- | --- | --- |
@@ -67,12 +94,14 @@ For a theorem whose header is `import Mathlib` and whose statement is
 | `:= by` on one line, `  simp` on the next | Proof body | The same |
 | `by simp` | Proof body | The same |
 | `intro x`, then `  simp` | Proof body | The statement with ` := by`, then `  intro x` and `    simp`: relative indentation kept |
+| `  intro x`, then `simp` | Proof body | The statement with ` := by`, then `  intro x` and `  simp`: the first line's own indentation is lost |
 | `by simp [foo]`, then `  <;> omega` | Proof body | `  simp [foo]`, then `    <;> omega` under the statement |
 | `:= by` alone | Proof body | The statement with ` := by`, and nothing under it |
 | The whole theorem, `theorem fixture_add_zero (a : ℕ) : a + 0 = a := by` and `  simp` | The theorem | The block as it stands |
 | The whole theorem, every line indented by two spaces | The theorem | The block, dedented |
 | `import Mathlib`, `import Aesop`, `open Nat`, then the whole theorem | The theorem | `open Nat`, then the theorem: the imports are dropped |
 | A helper `lemma fixture_helper …`, then `lemma fixture_add_zero …` using it | The theorem | Both lemmas, as they stand |
+| `@[simp] theorem fixture_add_zero (a : ℕ) : a + 0 = a := by`, then `  simp` | Proof body | The whole block, indented under the original statement: the declaration does not begin its line |
 | `theorem fixture_add_zero' …`, the theorem under another name | Proof body | The whole block, indented under the original statement |
 
 The last row is worth knowing: a reply that proves the theorem under another
@@ -126,14 +155,29 @@ depends on. It saves its outcome to a file, `judge.json`, and writes its
 progress to standard error. `pi` refuses anything already at the path of
 `judge.json` before the judge runs: that check fails as `judge_error`.
 
-**A pass** comes only from all of these together:
+**A pass.** A result is `proved` when, and only when, code was found and all
+of these hold:
 
-- the judge exited with status 0;
-- its saved outcome is a list of `[name, outcome]` pairs, and one pair is for
-  the theorem's name;
-- no pair has a failure mode;
-- every pair lists its axioms, and every axiom is on the allowlist;
-- the reference did not change.
+- the reference compile finished within its limit, exited with status 0,
+  printed no message of severity `error`, and wrote `Reference.olean`;
+- the submission compile finished within its limit, exited with status 0 and
+  printed no message of severity `error`;
+- the compiled reference has the same SHA-256 after the submission's compile
+  as after its own compile;
+- the submission compile wrote `Submission.olean`;
+- nothing was at the path of `judge.json` before the judge ran;
+- the judge finished within its limit and exited with status 0;
+- the judge's standard error contains neither `uncaught exception: (kernel)`
+  nor `kernel verification failed`, and has no line containing
+  `used disallowed axioms`;
+- `judge.json` holds JSON that is a non-empty list of pairs, each a name and
+  an object with a `failureMode` key;
+- one pair's name is the theorem's name;
+- every pair's `failureMode` is null;
+- every pair's `solutionInfo` has an `axioms` list of names, and every name
+  in every such list is on the allowlist;
+- the compiled reference has the same SHA-256 after the judge as after its
+  own compile.
 
 The axioms recorded for a result are the ones the judge lists for the theorem
 itself.
@@ -142,7 +186,7 @@ itself.
 
 | Verdict | Meaning |
 | --- | --- |
-| `proved` | The judge confirmed the proof, as above |
+| `proved` | Every condition of [a pass](#checking-the-file) holds |
 | `failed` | Code was found and the check did not pass; the record gives the reason |
 | `missing` | No code was found (see [Finding the code](#finding-the-code)), so nothing was checked |
 | `cut_off` | The reply stopped before the model finished it, in practice at the output limit. Not checked |
@@ -213,6 +257,12 @@ reaches its limit is killed, and the result is `check_timed_out`.
 benchmark's Lean options are the only ones passed, and a proof may raise it
 with `set_option`, as Mathlib's own proofs do. The wall-clock limit is what
 stops it.
+
+The generation limits are separate: the output-token limit and the time
+limit in the configuration's `[generation]` section (`max_output_tokens` and
+`time_limit_seconds`) are what produce `cut_off` and `timed_out`, before any
+check. A run records its generation settings in `run.json`'s `generation`
+and its two check limits in its `lean` entry.
 
 An attempt that the machine slept through, its check included, is thrown
 away and made again, as for answer runs.

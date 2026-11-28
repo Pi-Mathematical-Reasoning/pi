@@ -103,6 +103,7 @@ first removes that theorem's proof file, so a file left by an attempt that
 never reached the records is removed when the theorem is attempted again.
 The files restate the benchmark's header and statement, so they are
 published to the bucket with the run and never committed; they can also be
-rebuilt from `results.jsonl` and the pinned benchmark. For a Lean run, `audit.json` covers each file in `proofs/` as well
-as `run.json`, `results.jsonl` and `report.md`, and `pi publish` uploads
-exactly the files the audit names.
+rebuilt from `results.jsonl` and the pinned benchmark. For a Lean run,
+`audit.json` covers each file in `proofs/` as well as `run.json`,
+`results.jsonl` and `report.md`, and `pi publish` uploads exactly the files
+the audit names.

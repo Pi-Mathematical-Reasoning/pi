@@ -82,7 +82,7 @@ makes the module names simply `Target` and `Submission`. `-D name=value` (with a
 | `helper_axiom` | axioms | 0 | 1 | `failureMode` `"axioms"`, solution axioms `["pi_helper"]` | yes |
 | `unused_sorry` | sorry | 0 | 1 | `failureMode` **null** for `pi_case`; the rejection is only in stderr: `pi_unused used disallowed axioms. #[sorryAx]` | rejected, see note 1 |
 | `weakened` | statement_changed | 0 | 1 | `failureMode` `"thmType"` (`theorem type mismatch`) | yes |
-| `renamed` | statement_changed | 0 | 1 | `failureMode` `"notFound"`, `solutionInfo` null | yes |
+| `renamed` | statement_changed | 0 | 1 | `failureMode` `"notFound"`, `solutionInfo` null | yes (through `pi`: `lean_error`, see below) |
 | `reformatted` | proved | 0 | 0 | `failureMode` null | yes |
 | `native_decide` | kernel_rejected | 0 | 1 | no `judge.json`; stderr `uncaught exception: (kernel) (interpreter) unknown declaration 'pi_case._nativeDecide_1_1'` | rejected, see note 2 |
 | `fake_success_exit` | statement_changed | 0 | 1 | `failureMode` `"notFound"`; the compile printed `Finished.` (information) and `using 'exit' to interrupt Lean` (warning) | yes |
@@ -94,6 +94,9 @@ makes the module names simply `Target` and `Submission`. `-D name=value` (with a
 | `answer_wrapper` | record | 0 | 1 | `failureMode` `"thmType"` | recorded |
 
 No case expected to fail was accepted, and none of the three exploits was accepted.
+
+The table records the judge's result on the raw files. Through `pi`, the `renamed` block declares
+`pi_case'`, not `pi_case`, so it is treated as a proof body and graded `lean_error`.
 
 ### Notes
 

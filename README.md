@@ -213,7 +213,9 @@ Nothing under `data/` is committed.
 | `benchmarks/minif2f-test.toml` | The 244 theorems of miniF2F's test split, as corrected by Google DeepMind, in Lean 4.27 | The scored proof baseline. The model is never run on it outside a pre-registered run |
 
 A Lean run uses a configuration with a `[lean]` section, which holds the
-instruction placed above each theorem and the two check limits:
+instruction placed above each theorem and the two check limits. The commands
+below use placeholders because the only Lean definition today is the scored
+test split; the development definition comes with the development run.
 
 ```sh
 uv run pi eval --config configs/qwen3-14b-lean.toml \
