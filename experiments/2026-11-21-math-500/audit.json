@@ -1,0 +1,76 @@
+{
+  "run": "2026-11-21-math-500",
+  "audited_at": "2026-11-26T06:48:31+00:00",
+  "code": {
+    "revision": "20323d0b22356d0359ee1f13236576366a2c0471",
+    "dirty": false
+  },
+  "grader": {
+    "rules": 1,
+    "math_verify": "0.9.0",
+    "latex2sympy2_extended": "1.11.0",
+    "sympy": "1.14.0"
+  },
+  "passed": true,
+  "checks": [
+    {
+      "name": "complete",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "benchmark",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "problem file",
+      "passed": true,
+      "detail": "SHA-256 35dc41080a3680858b27fa7e0533d2d547825316fc5dafe5d316f4ccc5a06132 matches, from unknown: fetched before sources were recorded"
+    },
+    {
+      "name": "one result per problem",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "grader",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "verdicts",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "sessions",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "scored standard",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "report",
+      "passed": true,
+      "detail": ""
+    }
+  ],
+  "files": {
+    "run.json": {
+      "sha256": "54a4ceb0ae0bf6b4db5b075d7a820ab08235c2750ab734c9b2331df5dc98a141",
+      "size": 23216
+    },
+    "results.jsonl": {
+      "sha256": "553fe5b018558730fe43a01786601e09800b454a8a956578e91c2ce1e7e733a3",
+      "size": 7816364
+    },
+    "report.md": {
+      "sha256": "790389d8d7b377dec993090d8470218c5d3f617503e75741a192fb3d1bb90fa3",
+      "size": 2758
+    }
+  }
+}
