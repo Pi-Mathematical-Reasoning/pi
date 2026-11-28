@@ -345,7 +345,7 @@ def test_ensure_checkout_clones_at_the_commit_and_is_then_a_no_op()
 def test_refuses_a_checkout_at_another_commit():                      # match="is at"
 def test_refuses_a_checkout_with_changes():                           # match="has uncommitted changes"
 def test_theorems_come_in_file_order_or_in_the_order_of_the_ids()
-def test_refuses_a_file_with_the_wrong_number_of_theorems():          # match="expected 7 theorems, found 6"
+def test_refuses_a_file_with_the_wrong_number_of_theorems():          # match="expected 9 theorems, found 8" (the fixture holds 8)
 def test_refuses_when_the_shipped_proofs_are_not_the_ones_named():    # match="mathd_numbertheory_9002"
 def test_refuses_an_id_the_file_does_not_hold()
 def test_the_environment_names_the_toolchain_and_each_file_s_checksum()
