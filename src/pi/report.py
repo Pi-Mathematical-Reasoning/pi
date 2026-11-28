@@ -6,6 +6,7 @@ from pathlib import Path
 from statistics import mean, median
 
 from pi.evaluation import RUN, read_results
+from pi.lean_report import build_lean_report
 
 VERDICTS = ("correct", "incorrect", "missing", "cut_off", "timed_out")
 
@@ -16,6 +17,8 @@ def build_report(out: Path) -> str:
     run = json.loads((out / RUN).read_text())
     results = read_results(out)
     benchmark = run["benchmark"]
+    if benchmark.get("kind") == "lean":
+        return build_lean_report(run, results)
     total = len(benchmark["ids"])
     correct = sum(result["verdict"] == "correct" for result in results)
 

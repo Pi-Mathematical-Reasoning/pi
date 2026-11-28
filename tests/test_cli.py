@@ -9,7 +9,9 @@ import sys
 from pathlib import Path
 
 from pi.cli import main
-from pi.lean_project import Finished, ensure_checkout
+from pi.lean_evaluation import lean_prompt
+from pi.lean_project import Finished, ensure_checkout, lean_environment
+from pi.lean_statements import split_theorems
 from tests.lean_fake import FakeRunner
 from tests.ollama_stub import DIGEST
 from tests.test_lean_project import make_repository
@@ -593,3 +595,86 @@ def test_lean_check_reports_a_reply_without_code_as_missing(tmp_path, monkeypatc
         "  reason         no closed Lean code block in the reply",
     ]
     assert runner.calls == []
+
+
+def lean_eval_setup(tmp_path, monkeypatch, ollama, runner, config_extra=LEAN_SECTION):
+    """A Lean benchmark of the fixture's first three theorems, with Lean stood in for."""
+    arguments, _ = lean_check_setup(tmp_path, monkeypatch, runner, config_extra)
+    definition = Path(arguments[arguments.index("--benchmark") + 1])
+    definition.write_text(
+        definition.read_text()
+        + 'ids = ["fixture_add_zero", "fixture_no_docstring", "amc12a_2099_p1"]\n'
+    )
+    config = Path(arguments[arguments.index("--config") + 1])
+    config.write_text(CONFIG.format(host=ollama.host, digest=DIGEST, time_limit=30) + config_extra)
+    environment = {
+        "toolchain": "leanprover/lean4:v4.99.0",
+        "lean_version": "Lean (version 4.99.0)",
+        "files": {"Split.lean": "ab" * 32},
+        "options": [],
+    }
+    monkeypatch.setattr("pi.cli.lean_environment", lambda b, d: environment)
+    out = tmp_path / "run"
+    eval_arguments = ["eval", "--config", str(config), "--benchmark", str(definition)]
+    eval_arguments += ["--out", str(out), "--data-dir", str(tmp_path / "data")]
+    return eval_arguments, definition, out
+
+
+def test_eval_of_a_lean_benchmark_runs_every_theorem_and_prints_the_score(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    theorem = split_theorems(Path("tests/lean_fixture/Split.lean").read_text(encoding="utf-8"))[0]
+    ollama.replies = {
+        lean_prompt("Prove it.", theorem): {
+            "content": "```lean4\ntheorem fixture_add_zero (a : ℕ) : a + 0 = a := by\n  simp\n```\n"
+        }
+    }
+    runner = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 2.0)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 3.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    arguments, _, out = lean_eval_setup(tmp_path, monkeypatch, ollama, runner)
+
+    assert main(arguments) == 0
+
+    printed = capsys.readouterr().out
+    assert f"lean project {tmp_path / 'data'}" in printed
+    assert "fixture-lean: 1 of 3 proved (33.3%)" in printed
+    assert [p.name for p in (out / "proofs").iterdir()] == ["fixture_add_zero.lean"]
+    run = json.loads((out / "run.json").read_text())
+    assert run["sessions"][0]["problem_file"].endswith(f"@{run['benchmark']['commit']}")
+
+
+def test_eval_of_a_lean_benchmark_needs_a_lean_section(ollama, tmp_path, monkeypatch, capsys):
+    arguments, _, out = lean_eval_setup(tmp_path, monkeypatch, ollama, FakeRunner(), "")
+
+    assert main(arguments) == 1
+
+    assert "[lean]" in capsys.readouterr().err
+    assert not out.exists()
+    assert ollama.requests == []
+
+
+def test_eval_stops_before_any_attempt_when_lean_is_not_set_up(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    arguments, _, out = lean_eval_setup(tmp_path, monkeypatch, ollama, FakeRunner())
+    monkeypatch.setattr("pi.cli.lean_environment", lean_environment)
+    arguments[arguments.index("--data-dir") + 1] = str(tmp_path / "empty")
+
+    assert main(arguments) == 1
+
+    assert "pi lean-setup" in capsys.readouterr().err
+    assert not out.exists()
+    assert ollama.requests_to("/api/chat") == []
+
+
+def test_audit_of_a_lean_run_is_not_available_yet(ollama, tmp_path, monkeypatch, capsys):
+    _, definition, out = lean_eval_setup(tmp_path, monkeypatch, ollama, FakeRunner())
+
+    assert main(["audit", str(out), "--benchmark", str(definition)]) == 1
+
+    assert capsys.readouterr().err == (
+        f"error: cannot audit {out}: auditing a Lean run is not available yet\n"
+    )

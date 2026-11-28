@@ -12,9 +12,17 @@ from pi.checkpoint import CheckpointError
 from pi.config import ConfigError, load_config
 from pi.evaluation import RUN, EvaluationError, run_evaluation
 from pi.grading import grade, grader_version
+from pi.lean_evaluation import LeanTask
 from pi.lean_grading import Limits
 from pi.lean_grading import check as check_proof
-from pi.lean_project import LeanBenchmark, LeanRunner, lean_environment, load_theorems, setup
+from pi.lean_project import (
+    LeanBenchmark,
+    LeanRunner,
+    checkout_dir,
+    lean_environment,
+    load_theorems,
+    setup,
+)
 from pi.lean_statements import Theorem
 from pi.ollama import OllamaClient, OllamaError
 from pi.probe import run_probe, summarize
@@ -52,6 +60,8 @@ def _audit(options: argparse.Namespace) -> int:
     out = options.run
     try:
         benchmark = load_benchmark(options.benchmark)
+        if isinstance(benchmark, LeanBenchmark):
+            raise BenchmarkError("auditing a Lean run is not available yet")
         if not (out / REPORT).exists():
             (out / REPORT).write_text(build_report(out))
             print(f"wrote {out / REPORT} from the records")
@@ -175,6 +185,9 @@ def _eval(options: argparse.Namespace, arguments: list[str]) -> int:
     try:
         config = load_config(options.config)
         benchmark = load_benchmark(options.benchmark)
+        if isinstance(benchmark, LeanBenchmark):
+            _eval_lean(options, arguments, config, benchmark)
+            return _finished(options)
         fetched = fetch_file(benchmark, options.data_dir)
         for warning in fetched.warnings:
             print(f"warning: {warning}", file=sys.stderr)
@@ -207,6 +220,45 @@ def _eval(options: argparse.Namespace, arguments: list[str]) -> int:
             print(resume, file=sys.stderr)
         return status
 
+    return _finished(options)
+
+
+def _eval_lean(
+    options: argparse.Namespace, arguments: list[str], config, benchmark: LeanBenchmark
+) -> None:
+    """Run a Lean benchmark; nothing is written and no model is contacted until Lean is ready."""
+    if config.lean is None:
+        raise ConfigError(
+            f"{options.config} has no [lean] section, which holds the instruction and the limits"
+        )
+    environment = lean_environment(benchmark, options.data_dir)
+    theorems = load_theorems(benchmark, options.data_dir)
+    checkout = checkout_dir(options.data_dir, benchmark.repository, benchmark.commit)
+    print(f"lean project {checkout} at {benchmark.commit[:12]}", flush=True)
+    client = OllamaClient(config.runtime.host)
+    task = LeanTask(
+        benchmark,
+        config.lean,
+        LeanRunner(benchmark, options.data_dir),
+        environment,
+        options.out,
+        release=lambda: client.unload(config.model.name),
+    )
+    run_evaluation(
+        config,
+        benchmark,
+        theorems,
+        client,
+        ResourceSampler(interval=5),
+        options.out,
+        command=["pi", *arguments],
+        code=code_revision(Path(__file__).parent),
+        problem_file=f"{benchmark.repository}@{benchmark.commit}",
+        task=task,
+    )
+
+
+def _finished(options: argparse.Namespace) -> int:
     print(build_report(options.out).splitlines()[0].removeprefix("# "))
     print(f"results in {options.out}; `pi report {options.out}` prints the full report")
     return 0
