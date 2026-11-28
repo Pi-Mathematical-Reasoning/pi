@@ -4,13 +4,15 @@ import json
 
 import pytest
 
-from pi.audit import audit_run
+from pi.audit import AUDIT, audit_run
 from pi.config import LeanSettings
 from pi.evaluation import RESULTS, read_results
 from pi.lean_audit import audit_lean_run
 from pi.lean_evaluation import lean_prompt
 from pi.lean_project import BenchmarkError, Finished
+from pi.publish import publish_run
 from pi.report import build_report
+from pi.s3 import AwsCli
 from tests.lean_fake import FakeRunner
 from tests.test_lean_evaluation import (
     BENCHMARK,
@@ -34,11 +36,12 @@ NAMES = [
     "lean environment",
     "one result per problem",
     "grader",
-    "verdicts",
     "proof files",
     "sessions",
     "report",
+    "verdicts",
 ]
+NOT_RUN = "not run: an earlier check failed"
 
 
 @pytest.fixture
@@ -128,13 +131,13 @@ def test_audit_run_dispatches_a_lean_definition_to_the_lean_audit(finished, monk
     assert audit_run(finished, BENCHMARK, finished.parent / "data")["passed"] is True
 
 
-def test_a_proved_result_is_checked_again_at_four_times_the_limits(finished):
+def test_every_result_checked_again_is_checked_at_four_times_the_limits(finished):
     runner = again_runner()
 
     audit(finished, runner)
 
-    # The proved result at four times the limits, then the failed one at the run's own.
-    assert [call[-1] for call in runner.calls] == [1200, 1200, 2400, 300, 300]
+    # The proved result, then the failed one, each at four times the run's 300 and 600 s.
+    assert [call[-1] for call in runner.calls] == [1200, 1200, 2400, 1200, 1200]
 
 
 def test_a_proof_that_no_longer_checks_fails_the_verdicts_check(finished):
@@ -272,6 +275,15 @@ def test_a_missing_altered_or_extra_proof_file_fails_the_proof_files_check(finis
     assert failed(audit(finished)) == ["proof files"]
 
 
+@pytest.mark.parametrize("name", [".DS_Store", "fixture_add_zero.lean~", "sub"])
+def test_a_stray_entry_in_the_proofs_folder_is_named_with_what_to_do(finished, name):
+    (finished / "proofs" / name).mkdir() if name == "sub" else (finished / "proofs" / name).touch()
+
+    assert detail(audit(finished), "proof files") == (
+        f"proofs/{name} is not a proved theorem's proof file: remove it"
+    )
+
+
 def test_proof_files_without_a_proved_result_fail(finished):
     edit_results(finished, lambda r: r[0].update(verdict="failed"))
 
@@ -282,9 +294,12 @@ def test_a_different_lean_environment_fails_its_check(finished, monkeypatch):
     other = {**ENVIRONMENT, "toolchain": "leanprover/lean4:v4.100.0"}
     monkeypatch.setattr("pi.lean_audit.lean_environment", lambda benchmark, data_dir: other)
 
-    result = audit(finished)
+    runner = again_runner()
+    result = audit(finished, runner)
 
-    assert failed(result) == ["lean environment"]
+    assert failed(result) == ["lean environment", "verdicts"]
+    assert detail(result, "verdicts") == NOT_RUN
+    assert runner.calls == []
 
 
 def test_a_different_judge_fails_the_grader_check(finished):
@@ -292,7 +307,7 @@ def test_a_different_judge_fails_the_grader_check(finished):
 
     other = replace(BENCHMARK, judge_commit="e" * 40)
 
-    assert failed(audit(finished, benchmark=other)) == ["grader"]
+    assert failed(audit(finished, benchmark=other)) == ["grader", "verdicts"]
 
 
 def test_a_definition_with_another_commit_fails_the_benchmark_check(finished):
@@ -346,7 +361,7 @@ def test_a_scored_run_must_have_kept_the_scored_standard(finished):
 
     result = audit(finished)
 
-    assert [c["name"] for c in result["checks"]][-2:] == ["scored standard", "report"]
+    assert [c["name"] for c in result["checks"]][-3:] == ["scored standard", "report", "verdicts"]
     assert "scored standard" in failed(result)
 
 
@@ -516,3 +531,118 @@ def test_a_timed_out_check_s_time_is_that_of_the_step_that_timed_out(
     runner = FakeRunner(compiles=[OK, OK], judges=[JUDGED], saved=[outcome(ONE.id)])
 
     assert ("verdicts" not in failed(audit(timed_out, runner))) is passes
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda run: run["benchmark"].update(commit="e" * 40),  # benchmark
+        lambda run: run["grader"].update(judge_commit="e" * 40),  # grader
+    ],
+)
+def test_verdicts_are_not_checked_when_an_earlier_check_they_rest_on_failed(finished, change):
+    edit_run(finished, change)
+    runner = again_runner()
+
+    result = audit(finished, runner)
+
+    assert result["checks"][-1] == {"name": "verdicts", "passed": False, "detail": NOT_RUN}
+    assert runner.calls == []
+
+
+def test_verdicts_are_not_checked_when_a_result_is_missing(finished):
+    edit_results(finished, lambda r: r.pop())
+    runner = again_runner()
+
+    result = audit(finished, runner)
+
+    assert failed(result) == ["one result per problem", "verdicts"]
+    assert detail(result, "verdicts") == NOT_RUN
+    assert runner.calls == []
+
+
+def test_verdicts_are_checked_after_a_failed_proof_files_check(finished):
+    (finished / "proofs" / ".DS_Store").touch()
+    runner = again_runner()
+
+    result = audit(finished, runner)
+
+    assert failed(result) == ["proof files"]
+    assert len(runner.calls) == 5
+
+
+def test_each_result_checked_again_is_reported_as_it_finishes(finished):
+    lines = []
+
+    result = audit_lean_run(
+        finished, BENCHMARK, finished.parent / "data", again_runner(), report=lines.append
+    )
+
+    assert result["passed"] is True
+    assert [line.rsplit(" in ", 1)[0] for line in lines] == [
+        "[1/3] fixture_add_zero  proved  re-checked",
+        "[2/3] fixture_second  failed (lean_error)  re-checked",
+    ]
+    assert all(line.endswith(" s") for line in lines)
+
+
+def run_with_axioms(ollama, tmp_path, axioms):
+    """A run whose first theorem fails for an axiom off the allowlist, the judge naming these."""
+    out = tmp_path / "run"
+    info = {"constInfo": {"kind": "theorem"}, "axioms": axioms}
+    saved = [[ONE.id, {"targetInfo": info, "solutionInfo": info, "failureMode": None}]]
+    runner = FakeRunner(compiles=[OK, OK, OK, LEAN_ERROR], judges=[JUDGED], saved=[saved])
+    run_lean(ollama, out, runner, task=task_for(out, runner, settings=SETTINGS))
+    (out / "report.md").write_text(build_report(out))
+    assert read_results(out)[0]["lean"]["reason"] == "axioms"
+    return out
+
+
+def test_axioms_are_compared_without_regard_to_order(ollama, tmp_path):
+    out = run_with_axioms(ollama, tmp_path, ["Quot.sound", "propext"])
+    again = run_with_axioms(ollama, tmp_path / "again", ["propext", "Quot.sound"])
+    runner = FakeRunner(
+        compiles=[OK, OK, OK, LEAN_ERROR],
+        judges=[JUDGED],
+        saved=[read_results(again)[0]["lean"]["judge"]["outcome"]],
+    )
+
+    assert failed(audit(out, runner)) == []
+
+
+def test_axioms_are_compared_without_regard_to_repeats(finished):
+    edit_results(finished, lambda r: r[0]["lean"].update(axioms=["propext", "propext"]))
+
+    assert failed(audit(finished)) == []
+
+
+def test_axioms_other_than_those_recorded_still_fail(finished):
+    edit_results(finished, lambda r: r[0]["lean"].update(axioms=["propext", "Quot.sound"]))
+
+    assert detail(audit(finished), "verdicts") == "fixture_add_zero"
+
+
+def test_a_lean_run_s_audit_lets_it_be_published_with_its_proof_files(finished, aws):
+    (finished / AUDIT).write_text(json.dumps(audit(finished)))
+
+    publish_run(finished, "jaws-pi-prover-artifacts", AwsCli())
+
+    stored = aws / "jaws-pi-prover-artifacts" / "data" / "runs" / finished.name
+    proof = "proofs/fixture_add_zero.lean"
+    assert (stored / proof).read_bytes() == (finished / proof).read_bytes()
+    manifest = json.loads((stored / "_manifest.json").read_text())
+    assert manifest["audit"]["passed"] is True
+    assert list(manifest["files"]) == [
+        "run.json",
+        "results.jsonl",
+        "report.md",
+        proof,
+        "audit.json",
+    ]
+
+
+def test_a_reference_that_no_longer_compiles_stops_the_audit(finished):
+    runner = FakeRunner(compiles=[Finished(1, "", "Mathlib is not built", 1.0)])
+
+    with pytest.raises(BenchmarkError, match="(?s)fixture_add_zero: .*pi lean-setup"):
+        audit(finished, runner)

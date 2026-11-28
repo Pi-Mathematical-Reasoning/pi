@@ -164,6 +164,24 @@ def test_refuses_a_proof_file_the_audit_does_not_name(aws, audited_with_proofs):
     assert not (aws / BUCKET).exists()
 
 
+@pytest.mark.parametrize("name", [".DS_Store", "fixture_add_zero.lean~"])
+def test_a_stray_entry_in_the_proofs_folder_is_named_with_what_to_do(
+    aws, audited_with_proofs, name
+):
+    (audited_with_proofs / "proofs" / name).write_text("stray")
+
+    with pytest.raises(PublishError) as refused:
+        publish_run(audited_with_proofs, BUCKET, AwsCli())
+
+    assert str(refused.value) == (
+        f"proofs/{name} is not one of the proof files the audit checked: "
+        "remove it, then run `pi publish` again"
+    )
+    assert not (aws / BUCKET).exists()
+    (audited_with_proofs / "proofs" / name).unlink()  # doing what the message says works
+    assert publish_run(audited_with_proofs, BUCKET, AwsCli())[PROOF] == "uploaded"
+
+
 @pytest.mark.parametrize("name", ["../outside.txt", "/etc/hosts", "proofs/../../x"])
 def test_refuses_a_name_that_leaves_the_run_directory(aws, audited, name):
     audit = json.loads((audited / AUDIT).read_text())

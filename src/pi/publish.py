@@ -51,7 +51,12 @@ def publish_run(out: Path, bucket: str, s3, prefix: str = "data/runs/") -> dict:
     if folder.is_dir():
         for path in sorted(folder.iterdir()):
             if f"{PROOFS}/{path.name}" not in audit["files"]:
-                raise PublishError(f"{PROOFS}/{path.name} was not audited; run `pi audit` again")
+                # The audit passed with every entry there a proved theorem's file, so this
+                # one came later and is not one: removing it restores what was audited.
+                raise PublishError(
+                    f"{PROOFS}/{path.name} is not one of the proof files the audit checked: "
+                    "remove it, then run `pi publish` again"
+                )
     files = {name: fingerprint(out / name) for name in names}
 
     base = f"{prefix}{out.name}/"

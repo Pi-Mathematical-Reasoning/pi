@@ -2,17 +2,20 @@
 
 Like the answer audit, it takes nothing on trust and only reads the run. Here a verdict means
 "Lean and a judge program accepted this proof", so the `verdicts` check grades each saved reply
-again, one Lean check at a time. When in doubt a check fails and names the theorem.
+again, one Lean check at a time. It takes hours, so it comes last and runs only when the checks
+it rests on passed. When in doubt a check fails and names the theorem.
 """
 
 import json
+import time
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 
 from pi.audit import REPORT, _scored_problems, fingerprint
-from pi.evaluation import RESULTS, RUN, read_results
+from pi.evaluation import RESULTS, RUN, read_results, shown_verdict
 from pi.lean_evaluation import PROOFS
 from pi.lean_grading import Limits, assemble, check, extract_code, flags, lean_grader_version
 from pi.lean_project import LeanBenchmark, LeanRunner, lean_environment, load_theorems
@@ -22,15 +25,28 @@ from pi.revision import code_revision
 
 # How many offending theorems a check names before it says "and N more".
 _SHOWN = 5
-# A proof is checked again with this many times the limits the run was made under.
-_PROVED_FACTOR = 4
+# A result is checked again with this many times the limits the run was made under, so a check
+# that finished within a limit in the run cannot reach it on a busier machine.
+_FACTOR = 4
+# The checks `verdicts` rests on: when one failed, the long re-check is not run.
+_PREREQUISITES = ("benchmark", "lean environment", "grader", "one result per problem")
+_NOT_RUN = "not run: an earlier check failed"
 # What a record with a missing key or a value of the wrong type raises when it is read.
 _MALFORMED = (KeyError, TypeError, AttributeError, ValueError, IndexError)
 _ENVIRONMENT_KEYS = ("toolchain", "lean_version", "files", "options")
 
 
-def audit_lean_run(out: Path, benchmark: LeanBenchmark, data_dir: Path, runner=None) -> dict:
-    """Every check's outcome, and the checksum of each file audited."""
+def audit_lean_run(
+    out: Path,
+    benchmark: LeanBenchmark,
+    data_dir: Path,
+    runner=None,
+    report: Callable[[str], None] = lambda line: None,
+) -> dict:
+    """Every check's outcome, and the checksum of each file audited.
+
+    `report` is given one line for each result checked again with Lean, as it finishes.
+    """
     out = Path(out)
     # Without Lean set up this raises the error that names `pi lean-setup`: the audit stops.
     environment = lean_environment(benchmark, data_dir)
@@ -57,13 +73,18 @@ def audit_lean_run(out: Path, benchmark: LeanBenchmark, data_dir: Path, runner=N
     record("one result per problem", lambda: _result_count_problems(results, theorems))
     current = lean_grader_version(benchmark)
     record("grader", lambda: _grader_problems(run, current))
-    record("verdicts", lambda: _verdict_problems(run, results, theorems, benchmark, runner))
     record("proof files", lambda: _proof_file_problems(out, results, theorems))
     sessions = len(run.get("sessions", []))
     record("sessions", lambda: [r["id"] for r in results if _bad_session(r, sessions)])
     if run["benchmark"].get("scored"):
         record("scored standard", lambda: _scored_problems(run, results))
     record("report", lambda: _report_problems(out))
+    if any(not c["passed"] for c in checks if c["name"] in _PREREQUISITES):
+        checks.append({"name": "verdicts", "passed": False, "detail": _NOT_RUN})
+    else:
+        record(
+            "verdicts", lambda: _verdict_problems(run, results, theorems, benchmark, runner, report)
+        )
 
     return {
         "run": out.name,
@@ -145,7 +166,12 @@ def _report_problems(out: Path) -> list[str]:
 
 
 def _verdict_problems(
-    run: dict, results: list[dict], theorems: list[Theorem], benchmark: LeanBenchmark, runner
+    run: dict,
+    results: list[dict],
+    theorems: list[Theorem],
+    benchmark: LeanBenchmark,
+    runner,
+    report: Callable[[str], None],
 ) -> list[str]:
     by_id = {theorem.id: theorem for theorem in theorems}
     settings = run["lean"]
@@ -154,15 +180,26 @@ def _verdict_problems(
         _seconds(settings["judge_time_limit_seconds"]),
     )
     problems = []
-    for result in results:
+    for position, result in enumerate(results, start=1):
         name = result.get("id")
+        done = partial(_report_recheck, report, position, len(results), result)
         try:
-            follows = _verdict_follows(result, by_id.get(name), limits, benchmark, runner)
+            follows = _verdict_follows(result, by_id.get(name), limits, benchmark, runner, done)
         except _MALFORMED:
             follows = False
         if not follows:
             problems.append(str(name))
     return problems
+
+
+def _report_recheck(
+    report: Callable[[str], None], position: int, total: int, result: dict, seconds: float
+) -> None:
+    try:
+        verdict = shown_verdict(result)
+    except _MALFORMED:
+        verdict = "?"
+    report(f"[{position}/{total}] {result.get('id')}  {verdict}  re-checked in {seconds:.1f} s")
 
 
 def _seconds(value: object) -> float:
@@ -172,9 +209,18 @@ def _seconds(value: object) -> float:
 
 
 def _verdict_follows(
-    result: dict, theorem: Theorem | None, limits: Limits, benchmark: LeanBenchmark, runner
+    result: dict,
+    theorem: Theorem | None,
+    limits: Limits,
+    benchmark: LeanBenchmark,
+    runner,
+    done: Callable[[float], None],
 ) -> bool:
-    """Whether the recorded verdict, proof and Lean record are what the saved reply gives."""
+    """Whether the recorded verdict, proof and Lean record are what the saved reply gives.
+
+    `limits` are the run's own; a result checked again with Lean is checked at `_FACTOR` times
+    them, and `done` is then given the seconds that took.
+    """
     if theorem is None or result["answer"] is not None:
         return False
     response = result["response"]
@@ -191,27 +237,28 @@ def _verdict_follows(
     if recorded["flags"] != flags(code):
         return False
     verdict = result["verdict"]
-    if verdict == "proved":
-        stricter = Limits(
-            limits.compile_seconds * _PROVED_FACTOR, limits.judge_seconds * _PROVED_FACTOR
-        )
-        again = _graded(theorem, response, runner, stricter, benchmark)
-        return (
-            again.verdict == "proved"
-            and recorded["reason"] is None
-            and recorded["axioms"] == again.lean["axioms"]
-        )
-    if verdict != "failed":
+    if verdict not in ("proved", "failed"):
         return False
     reason = recorded["reason"]
-    if reason == "check_timed_out":
+    if verdict == "failed" and reason == "check_timed_out":
         return _ran_to_the_limit(recorded, limits)
-    again = _graded(theorem, response, runner, limits, benchmark)
+    longer = Limits(limits.compile_seconds * _FACTOR, limits.judge_seconds * _FACTOR)
+    started = time.monotonic()
+    again = _graded(theorem, response, runner, longer, benchmark)
+    done(time.monotonic() - started)
+    if verdict == "proved":
+        return again.verdict == "proved" and reason is None and _same_axioms(recorded, again.lean)
     return (
         again.verdict == "failed"
         and again.lean["reason"] == reason
-        and recorded["axioms"] == again.lean["axioms"]
+        and _same_axioms(recorded, again.lean)
     )
+
+
+def _same_axioms(recorded: dict, again: dict) -> bool:
+    """The same axioms, in any order and however often each is listed."""
+    axioms = recorded["axioms"]
+    return isinstance(axioms, list) and set(axioms) == set(again["axioms"])
 
 
 def _ungraded(result: dict, verdict: str) -> bool:
@@ -258,7 +305,9 @@ def _proof_file_problems(out: Path, results: list[dict], theorems: list[Theorem]
             return problems + [f"{PROOFS} is not a directory"]
         wanted = {f"{name}.lean" for name in proved}
         problems += [
-            f"{p.name} is not a proved theorem's" for p in _listing(folder) if p.name not in wanted
+            f"{PROOFS}/{p.name} is not a proved theorem's proof file: remove it"
+            for p in _listing(folder)
+            if p.name not in wanted
         ]
     return problems
 

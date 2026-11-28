@@ -709,3 +709,61 @@ def test_audit_without_lean_set_up_says_so(ollama, tmp_path, monkeypatch, capsys
     assert error.startswith(f"error: cannot audit {out}: ")
     assert "pi lean-setup" in error
     assert not (out / "audit.json").exists()
+
+
+def proved_lean_run(ollama, tmp_path, monkeypatch):
+    """A finished Lean run of three theorems, the first proved, made through `pi eval`."""
+    theorem = split_theorems(Path("tests/lean_fixture/Split.lean").read_text(encoding="utf-8"))[0]
+    statement = "theorem fixture_add_zero (a : ℕ) : a + 0 = a := by"
+    ollama.replies = {
+        lean_prompt("Prove it.", theorem): {
+            "content": f"```lean4\n{statement}\n  simp\n```\n",
+            "thinking": f"```lean4\n{statement}\n  omega\n```",
+        }
+    }
+    runner = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 2.0)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 3.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    arguments, definition, out = lean_eval_setup(tmp_path, monkeypatch, ollama, runner)
+    assert main(arguments) == 0
+    return definition, out
+
+
+def test_audit_of_a_sound_lean_run_reports_each_recheck_and_each_check(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    definition, out = proved_lean_run(ollama, tmp_path, monkeypatch)
+    run = json.loads((out / "run.json").read_text())
+    monkeypatch.setattr("pi.lean_audit.lean_environment", lambda b, d: dict(run["lean"]))
+    again = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 2.0)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 3.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    monkeypatch.setattr("pi.lean_audit.LeanRunner", lambda benchmark, data_dir: again)
+    capsys.readouterr()
+
+    status = main(
+        ["audit", str(out), "--benchmark", str(definition), "--data-dir", str(tmp_path / "data")]
+    )
+
+    printed = capsys.readouterr().out.splitlines()
+    assert status == 0
+    assert printed[0] == f"wrote {out / 'report.md'} from the records"
+    assert printed[1].startswith("[1/3] fixture_add_zero  proved  re-checked in ")
+    assert printed[2:] == [
+        "passed: complete",
+        "passed: benchmark",
+        "passed: lean environment",
+        "passed: one result per problem",
+        "passed: grader",
+        "passed: proof files",
+        "passed: sessions",
+        "passed: report",
+        "passed: verdicts",
+        f"audit passed; written to {out / 'audit.json'}",
+    ]
+    audit = json.loads((out / "audit.json").read_text())
+    assert audit["passed"] is True and "proofs/fixture_add_zero.lean" in audit["files"]

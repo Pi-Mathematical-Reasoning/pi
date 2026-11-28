@@ -16,6 +16,7 @@ from pi.checkpoint import CheckpointError
 from pi.config import ConfigError, load_config
 from pi.evaluation import RUN, EvaluationError, run_evaluation
 from pi.grading import grade, grader_version
+from pi.lean_audit import audit_lean_run
 from pi.lean_evaluation import LeanTask
 from pi.lean_grading import Limits
 from pi.lean_grading import check as check_proof
@@ -95,7 +96,10 @@ def _audit(options: argparse.Namespace) -> int:
         if not (out / REPORT).exists():
             (out / REPORT).write_text(build_report(out))
             print(f"wrote {out / REPORT} from the records")
-        audit = audit_run(out, benchmark, options.data_dir)
+        if isinstance(benchmark, LeanBenchmark):  # hours of Lean: each re-check is shown
+            audit = audit_lean_run(out, benchmark, options.data_dir, report=_announce)
+        else:
+            audit = audit_run(out, benchmark, options.data_dir)
     except (OSError, ValueError, KeyError, BenchmarkError, EvaluationError) as error:
         return _fail(f"cannot audit {out}: {error}")
 
@@ -307,6 +311,10 @@ def _report(options: argparse.Namespace) -> int:
         options.out.write_text(report)
         print(f"report written to {options.out}")
     return 0
+
+
+def _announce(line: str) -> None:
+    print(line, flush=True)
 
 
 def _reply_in(record: Path) -> str:
