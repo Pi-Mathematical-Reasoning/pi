@@ -670,11 +670,16 @@ def test_eval_stops_before_any_attempt_when_lean_is_not_set_up(
     assert ollama.requests_to("/api/chat") == []
 
 
-def test_audit_of_a_lean_run_is_not_available_yet(ollama, tmp_path, monkeypatch, capsys):
-    _, definition, out = lean_eval_setup(tmp_path, monkeypatch, ollama, FakeRunner())
+def test_audit_without_lean_set_up_says_so(ollama, tmp_path, monkeypatch, capsys):
+    theorem = split_theorems(Path("tests/lean_fixture/Split.lean").read_text(encoding="utf-8"))[0]
+    ollama.replies = {lean_prompt("Prove it.", theorem): {"content": "No idea."}}
+    arguments, definition, out = lean_eval_setup(tmp_path, monkeypatch, ollama, FakeRunner())
+    assert main(arguments) == 0
 
-    assert main(["audit", str(out), "--benchmark", str(definition)]) == 1
+    arguments = ["audit", str(out), "--benchmark", str(definition)]
+    assert main([*arguments, "--data-dir", str(tmp_path / "empty")]) == 1
 
-    assert capsys.readouterr().err == (
-        f"error: cannot audit {out}: auditing a Lean run is not available yet\n"
-    )
+    error = capsys.readouterr().err
+    assert error.startswith(f"error: cannot audit {out}: ")
+    assert "pi lean-setup" in error
+    assert not (out / "audit.json").exists()

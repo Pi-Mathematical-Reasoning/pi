@@ -17,6 +17,7 @@ from pathlib import Path
 from pi.benchmarks import Benchmark, BenchmarkError, fetch_file, load_problems
 from pi.evaluation import RESULTS, RUN, read_results
 from pi.grading import grade, grader_version
+from pi.lean_project import LeanBenchmark
 from pi.report import build_report
 from pi.revision import code_revision
 
@@ -28,6 +29,10 @@ _SHOWN = 5
 
 def audit_run(out: Path, benchmark: Benchmark, data_dir: Path) -> dict:
     """Every check's outcome, and the checksum of each file audited."""
+    if isinstance(benchmark, LeanBenchmark):
+        from pi.lean_audit import audit_lean_run  # lean_audit imports this module
+
+        return audit_lean_run(out, benchmark, data_dir)
     out = Path(out)
     run = json.loads((out / RUN).read_text())
     results = read_results(out)

@@ -60,8 +60,6 @@ def _audit(options: argparse.Namespace) -> int:
     out = options.run
     try:
         benchmark = load_benchmark(options.benchmark)
-        if isinstance(benchmark, LeanBenchmark):
-            raise BenchmarkError("auditing a Lean run is not available yet")
         if not (out / REPORT).exists():
             (out / REPORT).write_text(build_report(out))
             print(f"wrote {out / REPORT} from the records")
