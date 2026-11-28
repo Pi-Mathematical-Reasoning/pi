@@ -24,6 +24,9 @@
 - Paths given to Lean and the judge are relative to the checkout, so no home directory reaches a record or a fixture.
 - Commits are one line, Conventional Commits, at most 100 characters, with the trailer spelled exactly: `git commit -m "<subject>" -m "Co-authored-by: Claude Fable 5.2 <noreply@anthropic.com>"`. Never push to `main`; run `scripts/check.sh` before each pull request; fill every section of the typed PR template.
 - The design and this plan reach `main` through a docs pull request before Task 1. Stage 1 then works on a new branch, `feat/lean-grader`.
+- Run order: 1, 2, 3, 4, 5, 7, 6, 8 to 16. Task 7 comes before Task 6 because `pi lean-check` reads the `[lean]` configuration section.
+- Measured in Task 1: one compile takes about 7 s and 5 GB; one judge run about 26 s and a peak near 25 GB of memory. Never run two checks at once, and unload the model before a check.
+- Corrected after Task 1 (2026-11-27): the compile command needs `--root`; the judge's saved JSON is a list of `[name, outcome]` pairs; `native_decide` is rejected in the judge's kernel replay, not as an axiom failure.
 
 ## Review Focus
 
@@ -94,9 +97,10 @@ theorem pi_case (a b : ℕ) (h : a ≤ b) : a + 0 ≤ b := by
 | `weakened` | `theorem pi_case (a b : ℕ) (h : a ≤ b) : a + 0 ≤ b + 1 := by omega` | `statement_changed` |
 | `renamed` | the valid proof under the name `pi_case'` | `statement_changed` |
 | `reformatted` | the valid proof with the statement broken over three lines and extra spaces | `proved` |
-| `native_decide` | target `theorem pi_case : (2 : ℕ) ^ 10 = 1024 := by sorry`; proof `by native_decide` | `axioms` |
+| `native_decide` | target `theorem pi_case : (2 : ℕ) ^ 10 = 1024 := by sorry`; proof `by native_decide` | `kernel_rejected` |
 | `fake_success_exit` | `#eval IO.println "Finished."`, then `#exit`, then the valid proof | `statement_changed` |
-| `add_false` | `SafeVerifyTest/AddFalse/Bad.lean` from the judge checkout, with `import Mathlib` in place of its import; target `theorem falseThm : False := by sorry` | not `proved` |
+| `add_false` | `SafeVerifyTest/AddFalse/Bad.lean` from the judge checkout, with `import Mathlib` in place of its import; target `theorem falseThm : False := by sorry` | not `proved` (on Lean 4.27 it does not compile, so it never reaches the judge) |
+| `add_false_env` | adds `pi_false : False` with a bogus value through `Environment.addDeclCore` with `doCheck := false`, then `theorem falseThm : False := pi_false`; same target as `add_false`. It compiles, and `#print axioms` reports no axioms | `kernel_rejected` |
 | `replace_axiom` | `SafeVerifyTest/ReplaceAxiom/Bad.lean`, same change; its `Target.lean` with `import Mathlib` added | not `proved` |
 | `skip_kernel` (record only) | the valid proof under `set_option debug.skipKernelTC true in` (the judge replays it in the kernel either way) | record |
 | `renamed_binders` (record only) | `theorem pi_case (x y : ℕ) (hxy : x ≤ y) : x + 0 ≤ y := by simpa using hxy` | record |
@@ -106,8 +110,8 @@ theorem pi_case (a b : ℕ) (h : a ≤ b) : a + 0 ≤ b := by
 
 ```sh
 O="-D autoImplicit=false -D relaxedAutoImplicit=false"
-lake env lean --json $O -o $W/Target.olean $W/Target.lean
-lake env lean --json $O -o $W/Submission.olean $W/Submission.lean > $C/compile.stdout; echo $? > $C/compile.exit
+lake env lean --json $O --root=$W -o $W/Target.olean $W/Target.lean
+lake env lean --json $O --root=$W -o $W/Submission.olean $W/Submission.lean > $C/compile.stdout; echo $? > $C/compile.exit
 lake env ../SafeVerify-b291b588a539/.lake/build/bin/safe_verify --save $W/judge.json \
   $W/Target.olean $W/Submission.olean 2> $C/judge.stderr; echo $? > $C/judge.exit
 cp $W/judge.json $C/ 2>/dev/null
@@ -115,7 +119,7 @@ cp $W/judge.json $C/ 2>/dev/null
 
 Skip the judge when the submission did not compile (`fake_success_exit` compiles; check). Keep paths relative as shown.
 
-- [ ] **Step 5: Gate.** Compare each case with its expected column: `proved` means `judge.exit` is 0 and `judge.json` holds one outcome with a null `failureMode`. **If `add_false`, `replace_axiom`, or any case expected to fail is accepted, or the pipeline cannot be made to run, stop here and report to the owner.** If a failing case fails for a different reason than its row, record that and carry on: Task 5's rules must then be read against the captured output, and the row corrected in this plan. The two exploit cases are SafeVerify's own tests at this commit and should compile; if one does not, record it and drop it from Task 5's list.
+- [ ] **Step 5: Gate.** Compare each case with its expected column: `proved` means `judge.exit` is 0 and `judge.json` holds one `[name, outcome]` pair with a null `failureMode`. **If `add_false`, `replace_axiom`, or any case expected to fail is accepted, or the pipeline cannot be made to run, stop here and report to the owner.** If a failing case fails for a different reason than its row, record that and carry on: Task 5's rules must then be read against the captured output, and the row corrected in this plan. The two exploit cases are SafeVerify's own tests at this commit and should compile; if one does not, record it and drop it from Task 5's list.
 
 - [ ] **Step 6: Write `tests/lean_cases/README.md`**: the exact commands that worked, `lake env lean --version`, the wall time and peak memory of the `valid` compile (`/usr/bin/time -l`), disk used by `data/lean/`, what `skip_kernel`, `renamed_binders` and `answer_wrapper` did, any deviation from Step 4's commands, and that `add_false` and `replace_axiom` are adapted from SafeVerify (Apache-2.0).
 
@@ -305,6 +309,7 @@ def ensure_checkout(data_dir: Path, repository: str, commit: str, run=subprocess
 def load_theorems(benchmark: LeanBenchmark, data_dir: Path) -> list[Theorem]
 def lean_environment(benchmark: LeanBenchmark, data_dir: Path, run=subprocess.run) -> dict
 def setup(benchmark: LeanBenchmark, data_dir: Path, report=print, run=subprocess.run) -> None
+    # its last report line is "<name>: 244 theorems", or "<name>: 30 of 256 theorems" for a subset
 ```
 
 `lean_environment` returns `{"toolchain": str, "lean_version": str, "files": {"lean-toolchain": sha, "lake-manifest.json": sha, "lakefile.lean": sha, <benchmark.file>: sha}, "options": [...]}`.
@@ -340,7 +345,7 @@ def test_ensure_checkout_clones_at_the_commit_and_is_then_a_no_op()
 def test_refuses_a_checkout_at_another_commit():                      # match="is at"
 def test_refuses_a_checkout_with_changes():                           # match="has uncommitted changes"
 def test_theorems_come_in_file_order_or_in_the_order_of_the_ids()
-def test_refuses_a_file_with_the_wrong_number_of_theorems():          # match="expected 7 theorems, found 6"
+def test_refuses_a_file_with_the_wrong_number_of_theorems():          # match="expected 9 theorems, found 8" (the fixture holds 8)
 def test_refuses_when_the_shipped_proofs_are_not_the_ones_named():    # match="mathd_numbertheory_9002"
 def test_refuses_an_id_the_file_does_not_hold()
 def test_the_environment_names_the_toolchain_and_each_file_s_checksum()
@@ -400,7 +405,8 @@ def test_output_is_read_as_utf8_whatever_the_locale(tmp_path, monkeypatch):     
 def test_compile_runs_lean_in_the_checkout_with_the_options_and_relative_paths():
     # recording run_process; assert the command is exactly
     # ["lake","env","lean","--json","-D","autoImplicit=false","-D","relaxedAutoImplicit=false",
-    #  "-o","../work/x/Submission.olean","../work/x/Submission.lean"] and cwd is the checkout
+    #  "--root=../work/x","-o","../work/x/Submission.olean","../work/x/Submission.lean"]
+    # and cwd is the checkout (without --root, Lean 4.27 refuses a file outside its working directory)
 
 def test_judge_runs_safeverify_through_lake_env_with_relative_paths():
     # ["lake","env","../SafeVerify-b291b588a539/.lake/build/bin/safe_verify","--save",
@@ -434,7 +440,7 @@ def extract_code(reply: str) -> str | None
 def assemble(theorem: Theorem, code: str) -> str          # the submission file
 def reference_source(theorem: Theorem) -> str             # header + "\n" + statement + " := by\n  sorry\n"
 def flags(code: str) -> list[str]                         # of: #eval run_cmd elab macro syntax initialize IO.
-def judgement(done: Finished, saved: list | None, allowed: Sequence[str]) -> tuple[str | None, list[str]]
+def judgement(done: Finished, saved: list | None, allowed: Sequence[str], name: str) -> tuple[str | None, list[str]]
     # (None when it passes, else the reason; the submission theorem's axioms)
 ```
 
@@ -477,11 +483,12 @@ def test_flags_compile_time_commands_and_not_words_that_contain_them():
 
 EXPECTED = {"valid": None, "sorry": "sorry", "helper_sorry": "sorry", "helper_axiom": "axioms",
             "unused_sorry": "sorry", "weakened": "statement_changed", "renamed": "statement_changed",
-            "reformatted": None, "native_decide": "axioms", "fake_success_exit": "statement_changed"}
+            "reformatted": None, "native_decide": "kernel_rejected", "fake_success_exit": "statement_changed",
+            "replace_axiom": "kernel_rejected", "add_false_env": "kernel_rejected"}
 @pytest.mark.parametrize("case, reason", EXPECTED.items())
 def test_reads_each_captured_judgement(case, reason):
     assert judgement(*captured(case), ALLOWED)[0] == reason
-@pytest.mark.parametrize("case", ["add_false", "replace_axiom"])
+@pytest.mark.parametrize("case", ["add_false_env", "replace_axiom"])
 def test_an_exploit_is_never_a_pass(case):
     assert judgement(*captured(case), ALLOWED)[0] is not None
 
@@ -497,13 +504,13 @@ def test_an_axiom_outside_the_allowlist_fails_even_if_the_judge_passed_it():
 
 - [ ] **Step 2: Run them.** Expected: FAIL, `No module named 'pi.lean_grading'`.
 
-- [ ] **Step 3: Implement.** A block declares the theorem when it has a line matching `^(theorem|lemma)\s+<name>(?![\w.'!?])`. `judgement` applies these rules in order; `saved` is SafeVerify's JSON, a list of `{targetInfo, solutionInfo, failureMode}`:
+- [ ] **Step 3: Implement.** A block declares the theorem when it has a line matching `^(theorem|lemma)\s+<name>(?![\w.'!?])`. `judgement` applies these rules in order; `saved` is SafeVerify's JSON, a list of `[name, {targetInfo, solutionInfo, failureMode}]` pairs (absent when the judge threw), and `name` is the theorem's id:
 
 1. `exit_code is None` → `check_timed_out`.
-2. stderr contains `kernel verification failed` → `kernel_rejected`.
+2. stderr contains `uncaught exception: (kernel)` or `kernel verification failed` → `kernel_rejected`.
 3. any `failureMode` of `thmType`, `notFound` or a `kind` object → `statement_changed`.
 4. a `failureMode` of `axioms`, or stderr containing `used disallowed axioms` → `sorry` if `sorryAx` is among the axioms named, else `axioms`.
-5. exit 0, exactly one outcome, null `failureMode`, a `solutionInfo` whose axioms are all allowed → pass; a disallowed axiom there → `axioms`.
+5. exit 0, a pair for `name`, every pair with a null `failureMode` and a `solutionInfo` whose axioms are all allowed → pass; a disallowed axiom there → `axioms`.
 6. anything else → `judge_error`.
 
 - [ ] **Step 4: Run the tests.** Expected: PASS.
@@ -517,7 +524,7 @@ def test_an_axiom_outside_the_allowlist_fails_even_if_the_judge_passed_it():
 - Create: `tests/test_lean_real.py`, `tests/lean_fake.py`
 
 **Interfaces:**
-- Consumes: `LeanRunner` (Task 4), Task 5's functions.
+- Consumes: `LeanRunner` (Task 4), Task 5's functions, `LeanSettings` (Task 7, which runs before this task).
 - Produces:
 
 ```python
@@ -550,6 +557,7 @@ def test_a_compile_error_fails_without_asking_the_judge():        # exit 1 -> le
 def test_an_error_message_fails_even_when_lean_exits_zero():       # stdout line {"severity":"error",...}
 def test_a_compile_killed_at_its_limit_is_a_timeout():             # reason check_timed_out
 def test_a_reference_that_does_not_compile_is_a_judge_error()
+def test_a_reference_compile_killed_at_its_limit_is_a_timeout()    # reason check_timed_out
 def test_a_reference_that_changed_before_the_judge_ran_is_a_judge_error():
     # the fake's submission compile rewrites Reference.olean
 def test_saved_output_is_capped():                                  # Review Focus 4
@@ -562,7 +570,7 @@ def test_the_submission_is_what_assemble_built()
 
 - [ ] **Step 3: Implement `check`.** Inside `runner.work_dir()`: write and compile `Reference.lean`; hash `Reference.olean`; write and compile `Submission.lean`; fail on a non-zero exit or any stdout JSON line whose `severity` is `error`; hash the reference again and compare; run the judge; apply `judgement`. Cap `messages` and the judge's `stderr` at `MESSAGE_CAP`. Files are written as UTF-8.
 
-- [ ] **Step 4: Write `tests/test_lean_real.py`**, skipped unless `PI_LEAN_TESTS=1`. It uses a real `LeanRunner` on `data/` and `benchmarks/minif2f-test.toml` (for the pins only). For each case of Task 1 with an expected column it builds the theorem with `split_theorems(Target.lean)`, passes `Submission.lean` as a fenced reply, and asserts the verdict and reason. Three more with the default target: a proof-only reply `simpa using h` is `proved`; a reply repeating `import Mathlib` twice is `proved`; `Limits(5, 5)` gives `check_timed_out`.
+- [ ] **Step 4: Write `tests/test_lean_real.py`**, skipped unless `PI_LEAN_TESTS=1`. It uses a real `LeanRunner` on `data/` and `benchmarks/minif2f-test.toml` (for the pins only). For each case of Task 1 with an expected column it builds the theorem with `split_theorems(Target.lean)`, passes `Submission.lean` as a fenced reply, and asserts the verdict and reason (`add_false` is `lean_error`: it does not compile on Lean 4.27). Three more with the default target: a proof-only reply `simpa using h` is `proved`; a reply repeating `import Mathlib` twice is `proved`; a proof that begins `sleep 120000` under `Limits(30, 30)` gives `check_timed_out`.
 
 - [ ] **Step 5: Add `pi lean-check --config C --benchmark B --id ID --reply FILE`**: grades one saved reply against one theorem and prints the verdict, reason and axioms.
 
@@ -616,7 +624,6 @@ judge_time_limit_seconds = 300
 
 ```python
 class AnswerTask:
-    solved = "correct"
     blank: dict = {}                                        # extra fields of an ungraded result
     def identity(self, benchmark, problems) -> dict         # {"benchmark": {...as today...}, "grader": grader_version()}
     def check(self, problems) -> None                       # today's _check_references
@@ -653,8 +660,8 @@ def test_a_run_records_and_compares_every_identity_key_of_its_task():
 ### Task 9: Lean runs through `pi eval`
 
 **Files:**
-- Create: `src/pi/lean_evaluation.py`, `tests/test_lean_evaluation.py`
-- Modify: `src/pi/cli.py`, `tests/test_cli.py`
+- Create: `src/pi/lean_evaluation.py`, `src/pi/lean_report.py`, `tests/test_lean_evaluation.py`, `tests/test_lean_report.py`
+- Modify: `src/pi/cli.py`, `src/pi/report.py`, `tests/test_cli.py`
 
 **Interfaces:**
 - Consumes: `check`, `Limits`, `lean_grader_version`, `LeanRunner`, `lean_environment`, `load_theorems`, `LeanSettings`, the task seam.
@@ -665,14 +672,19 @@ def lean_prompt(instruction: str, theorem: Theorem) -> str
     # f"{instruction}\n\n```lean4\n{theorem.header}\n{theorem.statement} := by\n```\n"
 
 class LeanTask:
-    solved = "proved"
     blank = {"proof": None, "lean": None}
-    def __init__(self, benchmark: LeanBenchmark, settings: LeanSettings, runner, environment: dict, out: Path): ...
+    def __init__(self, benchmark: LeanBenchmark, settings: LeanSettings, runner, environment: dict, out: Path,
+                 release: Callable[[], None] = lambda: None): ...
+    # release() is called before each check; the CLI passes a function that unloads the model
     # identity(): "benchmark" {name, kind, repository, commit, file, sha256, subset, scored, ids},
     #             "grader" lean_grader_version(benchmark),
     #             "lean" {**environment, instruction, compile_time_limit_seconds, judge_time_limit_seconds}
     # grade(): {"verdict", "answer": None, "proof", "lean"}; writes out/proofs/<id>.lean when proved
+
+def build_lean_report(run: dict, results: list[dict]) -> str   # in lean_report.py; this task: the title only
 ```
+
+`cli._eval` prints the report's first line when a run ends, so this task adds the dispatch in `report.build_report` (when `run["benchmark"].get("kind") == "lean"`) and a `build_lean_report` that returns the title and, for an interrupted run, the same two-line notice the answer report gives. Task 10 builds the rest.
 
 - [ ] **Step 1: Write the failing tests** (Ollama stub answering with fenced proofs; `FakeRunner`)
 
@@ -690,6 +702,9 @@ def test_a_cut_off_reply_has_no_proof_and_no_lean_record()
 def test_the_run_names_its_lean_environment_rules_and_limits():   # run["benchmark"]["kind"] == "lean"; run["grader"]["lean_rules"] == 1
 def test_refuses_to_resume_under_a_different_instruction_or_toolchain():   # EvaluationError
 def test_an_attempt_the_machine_slept_through_is_checked_again():  # read_wake changes once -> two chats, one result
+def test_the_model_is_released_before_lean_runs():                 # release was called before the runner's first compile
+def test_a_finished_lean_run_s_report_starts_with_its_score():     # build_report(out).splitlines()[0] == "# sample: 1 of 3 proved (33.3%)"
+def test_an_interrupted_lean_run_s_report_says_it_is_incomplete()
 ```
 
 and in `tests/test_cli.py`:
@@ -711,8 +726,7 @@ def test_eval_stops_before_any_attempt_when_lean_is_not_set_up(...): # Review Fo
 ### Task 10: The report of a Lean run
 
 **Files:**
-- Create: `src/pi/lean_report.py`, `tests/test_lean_report.py`
-- Modify: `src/pi/report.py` (`build_report` dispatches when `run["benchmark"].get("kind") == "lean"`)
+- Modify: `src/pi/lean_report.py`, `tests/test_lean_report.py` (both created in Task 9, with the title and the dispatch in `report.build_report`)
 
 **Interfaces:**
 - Produces: `build_lean_report(run: dict, results: list[dict]) -> str`. It reuses `report._table`, `_cost`, `_duration` and `_code`.
@@ -817,7 +831,7 @@ experiments/*/proofs/
 - Create: `docs/lean-grading.md`
 - Modify: `docs/records.md`, `README.md`, `AGENTS.md`
 
-- [ ] **Step 1: Write `docs/lean-grading.md`** as Lean rules version 1, in the manner of `docs/grading.md`: what is graded; finding the code (a table of replies and what is taken, as Task 5's tests); the four assembly rules; the two steps; the verdicts and each reason with one example; the allowlist; the limits; the known limit and the flags; what the judge did with `unused_sorry`, `skip_kernel`, `renamed_binders` and `answer_wrapper` in Task 1.
+- [ ] **Step 1: Write `docs/lean-grading.md`** as Lean rules version 1, in the manner of `docs/grading.md`: what is graded; finding the code (a table of replies and what is taken, as Task 5's tests); the four assembly rules; the two steps; the verdicts and each reason with one example; the allowlist; the limits; the known limit and the flags; what the judge did with `unused_sorry`, `native_decide`, `skip_kernel`, `renamed_binders` and `answer_wrapper` in Task 1 (a restatement that drops `answer(…)` is `statement_changed`).
 
 - [ ] **Step 2: Update the rest.** `docs/records.md`: the `proof` and `lean` fields, the `lean` entry of `run.json`, the `proofs/` directory, and the Lean verdicts. `README.md`: a "Lean benchmarks" section after "After a run: audit, then publish" (install elan, `pi lean-setup`, `pi eval` with the Lean configuration, `pi lean-check`, `PI_LEAN_TESTS=1`), the new files in "Layout", and "Status". `AGENTS.md`: the model is never run on `benchmarks/minif2f-test.toml` outside a pre-registered run; debug the Lean grader on `tests/lean_cases/` and validation theorems; run `PI_LEAN_TESTS=1 uv run pytest tests/test_lean_real.py` before a pull request that touches the grader; proof files are never committed.
 
@@ -878,7 +892,7 @@ caffeinate -i uv run pi eval --config configs/qwen3-14b-lean.toml \
 
 Expected: 30 results, and a first line `minif2f-dev: N of 30 proved`.
 
-- [ ] **Step 3: Read every failure and tabulate:** verdicts and reasons; for each `lean_error`, whether the first error is packaging (imports, a restated statement that does not parse, Lean 3 syntax, a missing block) or mathematics; the proof rate for `answer(…)` and plain theorems apart; output tokens against the limit; compile and judge times against theirs; flags.
+- [ ] **Step 3: Read every failure and tabulate:** verdicts and reasons; for each `lean_error`, whether the first error is packaging (imports, a restated statement that does not parse, Lean 3 syntax, a missing block) or mathematics; the proof rate for `answer(…)` and plain theorems apart, and how many `statement_changed` failures only dropped the `answer(…)` wrapper; output tokens against the limit; compile and judge times against theirs; flags.
 
 - [ ] **Step 4: Decide, by these rules.**
   - A third or more of the failures are packaging: change the instruction or add an assembly rule (with its test, on a validation reply), and run again in a new directory. At most three development runs; after the third, take what is left to the owner.

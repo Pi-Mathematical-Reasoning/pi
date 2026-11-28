@@ -60,6 +60,45 @@ the brief, [PI_PROJECT.md](PI_PROJECT.md).
   states them. A change to how answers are found or compared bumps
   `RULES_VERSION` in `src/pi/grading.py` and updates that document. Debug the
   grader on development problems, never on evaluation problems.
+- **Never run the model on `benchmarks/minif2f-test.toml`** outside a
+  pre-registered run. It is the scored proof benchmark; its theorems are
+  evaluation problems.
+- **The Lean rules are versioned too.**
+  [docs/lean-grading.md](docs/lean-grading.md) states them. A change to how
+  the code is found, how the file is built or how the judge's outcome is read
+  bumps `LEAN_RULES_VERSION` in `src/pi/lean_grading.py` and updates that
+  document. Debug the Lean grader on the cases in `tests/lean_cases/` and on
+  validation theorems, never on test theorems.
+- **Run the real-Lean tests before a pull request that touches the Lean
+  grader:**
+
+  ```sh
+  PI_LEAN_TESTS=1 uv run pytest tests/test_lean_real.py
+  ```
+
+  They need `uv run pi lean-setup --benchmark benchmarks/minif2f-test.toml`
+  first and take about a quarter of an hour. One judge run peaks near 25 GB
+  of memory, so never run two Lean checks at once. A lock on
+  `data/lean/work/.lock` enforces it: when a second `pi eval`, `pi audit`,
+  `pi lean-check` or real-Lean test run reaches a check while another check
+  runs, it prints `waiting for another Lean check on this machine to finish`
+  to standard error and waits. The two checks never run together, but the
+  waiting command is held up, so still do not start one during a run.
+- **Make Lean runs and audits in a shell without AWS credentials.** They need
+  none, and the compile step runs code the model wrote. Only `pi publish`
+  needs them. Every `pi` command stops on SIGTERM and SIGHUP as on Ctrl-C,
+  killing any Lean processes it started, so a run of either kind can be
+  stopped with `kill` and resumed with the same command.
+- **A Lean run's audit is long and comes last.** `pi audit` checks the
+  records first and grades every saved reply again with Lean last, at four
+  times the run's limits, printing a line per result as it goes; it skips
+  that step when the benchmark, Lean environment, result-count or grader
+  check failed. A run holding any `judge_error` result needs a person to look
+  at it before it is published. `pi lean-check --run runs/<run>` checks the
+  reply a run saved for one theorem.
+- **Proof files are never committed.** A Lean run's `proofs/` directory
+  restates the benchmark's theorems; it is published to the bucket with the
+  run, and `.gitignore` keeps `experiments/*/proofs/` out of git.
 - **Never publish to the artifacts bucket yourself.** `pi publish` uploads with
   the owner's admin credentials; the owner runs it, or asks you to.
 - **Weights and checkpoints never go in git.** The brief keeps durable

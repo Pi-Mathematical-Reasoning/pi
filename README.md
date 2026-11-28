@@ -21,19 +21,22 @@ The full brief, with each milestone and its done condition, is
 
 ## Status
 
-**Three things run so far: the checkpoint probe, the answer grader and the
-benchmark run.** The probe loads the pinned checkpoint, gives it one problem
-and records how fast it went and what it cost the machine. The grader finds
-the final answer in a reply and decides whether it matches a reference. The
-benchmark run attempts every problem of a pinned benchmark once and reports
-the score. It has been run on the 30 development problems and not yet on
-MATH-500. The first deliverable is a reproducible score for the original
-checkpoint; training comes after that measurement.
+**Four things run so far: the checkpoint probe, the answer grader, the
+benchmark run and the Lean grader.** The probe loads the pinned checkpoint,
+gives it one problem and records how fast it went and what it cost the
+machine. The grader finds the final answer in a reply and decides whether it
+matches a reference. The benchmark run attempts every problem of a pinned
+benchmark once and reports the score. It has been run on the 30 development
+problems and on MATH-500, where the checkpoint answered 477 of 500
+correctly. The Lean grader checks a proof of a Lean 4 theorem with Lean and
+a separate judge, and the benchmark run uses it for Lean benchmarks; no Lean
+run has been made yet. The first deliverable is a reproducible score for the
+original checkpoint; training comes after that measurement.
 
 | Stage | What it measures | State |
 | --- | --- | --- |
-| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | In progress: the development run is done and the limits are set; the scored MATH-500 run has not been started |
-| Milestone 2: proof writing | Fraction of a pinned miniF2F subset proved, graded by Lean 4 | Not started |
+| Milestone 1: local baseline | Answer accuracy on MATH-500, one attempt per problem, run on a MacBook Pro | The scored MATH-500 run is made: 477 of 500 correct (95.4%), audited and published, in the [experiment log](experiments/README.md#2026-11-26-math-500-baseline-477-of-500-correct) |
+| Milestone 2: proof writing | Fraction of miniF2F's 244 test theorems proved, pinned by commit and graded by Lean 4 and SafeVerify | In progress: the Lean grader and Lean runs are built, and the grader is checked on 16 captured cases; the development run has not been made, and there is no Lean score yet |
 | Later experiments | Lean-guided revision, fine-tuning on AWS, a larger-model comparison | Not started |
 
 Measurements are in the [experiment log](experiments/README.md).
@@ -88,7 +91,9 @@ uv run pi report runs/dev
 `pi eval` attempts every problem once, from a fresh load of the model, and
 sends it only the problem text. Each result is saved as it finishes. If the
 run stops for any reason, the same command resumes it at the first problem
-with no result. It refuses to continue if the checkpoint, the settings, the
+with no result. Every `pi` command stops on SIGTERM and SIGHUP as it does on
+Ctrl-C, so `kill` stops a run cleanly and `pi eval` says how to resume. It
+refuses to continue if the checkpoint, the settings, the
 problems or the grader have changed since the run began.
 
 A run directory holds two files. `run.json` says what was run and whether it
@@ -176,6 +181,118 @@ power: this checkpoint generates a third slower on battery. Start a long run
 with `caffeinate -i` in front of the command so the machine does not sleep
 part way.
 
+## Lean benchmarks
+
+A Lean benchmark is a file of Lean 4 theorems. The model is asked for a
+proof, Lean compiles it, and a separate program,
+[SafeVerify](https://github.com/GasStationManager/SafeVerify), judges
+whether it proves the original statement using only allowed axioms. The
+rules, with examples, are in [docs/lean-grading.md](docs/lean-grading.md).
+
+It needs:
+
+- **elan**, which installs the Lean toolchain the project pins:
+  `brew install elan-init`.
+- **Disk:** about 8 GB under `data/lean/` (the project checkout with its
+  Mathlib build cache, and the judge) and 2.3 GB for the toolchain under
+  `~/.elan`.
+- **Memory:** one judge run peaks near 25 GB, so checks run one at a time and
+  the model is unloaded before each. A lock enforces it: each check holds
+  `data/lean/work/.lock`, and a check that finds it held prints
+  `waiting for another Lean check on this machine to finish` and waits.
+
+```sh
+brew install elan-init
+uv run pi lean-setup --benchmark benchmarks/minif2f-test.toml
+```
+
+`pi lean-setup` clones the benchmark's project and the judge into
+`data/lean/` at the commits the definition pins, fetches Mathlib's build
+cache, builds both, and counts the theorems; for `minif2f-test` it ends with
+`244 theorems`. It refuses a checkout at another commit or with changes.
+Nothing under `data/` is committed.
+
+| Benchmark | Theorems | Use |
+| --- | --- | --- |
+| `benchmarks/minif2f-test.toml` | The 244 theorems of miniF2F's test split, as corrected by Google DeepMind, in Lean 4.27 | The scored proof baseline. The model is never run on it outside a pre-registered run |
+
+A Lean run uses a configuration with a `[lean]` section, which holds the
+instruction placed above each theorem and the two check limits. The commands
+below use placeholders because the only Lean definition today is the scored
+test split; the development definition comes with the development run.
+
+```sh
+uv run pi eval --config configs/qwen3-14b-lean.toml \
+  --benchmark benchmarks/<lean benchmark>.toml --out runs/<run>
+uv run pi report runs/<run>
+```
+
+`pi eval` works as for answer runs, and resumes and refuses in the same way;
+a scored definition is held to the same standard. Before it writes anything
+or contacts the model, it checks that Lean and the judge are set up. The
+prompt is the instruction, then the theorem's header and statement with its
+proof left open. Each result records the proof taken from the reply and the
+Lean check, and each proved theorem's file is saved as `proofs/<id>.lean` in
+the run directory. Those files restate the benchmark, so they are never
+committed. Each progress line gives a failed result's reason, as
+`failed (lean_error)`. `pi report` gives the fraction proved, the failure
+reasons, the time Lean and the judge took, the results by family, and the
+accepted proofs that use compile-time commands, for a person to read. Its
+memory row is labelled `Peak memory (model)`: it measures Ollama, not Lean or
+the judge.
+
+If the reference file `pi` builds for a theorem, its statement closed with
+`sorry`, does not compile, the run stops with no result for that theorem: the
+setup or the machine is at fault, not the model. Fix the setup, with
+`pi lean-setup` if need be, and run the same command again to resume at that
+theorem. A Lean check that SIGTERM, SIGHUP or Ctrl-C stops kills the Lean or
+judge processes it started.
+
+A Lean run and its audit need no AWS credentials, so make them in a shell
+that has none: the compile step runs code the model wrote. Only `pi publish`
+needs credentials.
+
+Check one reply to one theorem, outside a run:
+
+```sh
+uv run pi lean-check --config configs/qwen3-14b-lean.toml \
+  --benchmark benchmarks/<lean benchmark>.toml --id <theorem> --reply reply.md
+```
+
+`reply.md` holds the reply's text, code block included. To check the reply
+a run saved for that theorem instead, give `--run runs/<run>` in place of
+`--reply`: it checks the reply's visible text, never the reasoning. It
+prints the verdict, the reason, the axioms, the flags and the time of each
+step.
+
+`pi audit` and `pi publish` work as for answer runs. The audit needs Lean set
+up. It first checks that the run is complete, the benchmark's pins, the Lean
+environment, that each theorem has one result, the grader, the proof files,
+the sessions, the scored standard for a scored run, and the report. Last, if
+the benchmark, Lean environment, result-count and grader checks passed, it
+grades every saved reply again, checking the proofs with Lean one at a time
+and printing a line as each one finishes, such as
+`[12/244] <id>  proved  re-checked in 41.2 s`. Every result checked again,
+`proved` or `failed`, is checked at four times the run's limits. A `proved`
+result must be proved again, and a `failed` one must fail again for the same
+reason; one that failed by timing out is not run again, but its recorded
+time must reach the limit. A full run takes hours to audit. `pi publish`
+uploads the proof files with the rest. A run holding any `judge_error`
+result needs a person to look at it before it is published: the reason can
+mean the judge or the machine failed, not the proof.
+
+The real-Lean tests grade the captured cases in `tests/lean_cases/` with Lean
+and the judge, after `pi lean-setup`. They take about a quarter of an hour and
+are skipped unless asked for:
+
+```sh
+PI_LEAN_TESTS=1 uv run pytest tests/test_lean_real.py
+```
+
+Never run two Lean checks at once, a test run included: each judge run needs
+about 25 GB. The lock makes a second check wait for the first, so a test
+run started during a run makes one of them wait at each check.
+
 ## Cloud resources
 
 Pi's AWS resources are provisioned by [Jaws](https://github.com/Jaws-Platform/jaws)
@@ -189,12 +306,13 @@ runner to the same project.
 ```text
 PI_PROJECT.md    the project brief
 jaws.yaml        the Jaws project file: Pi's cloud resources
-benchmarks/      benchmark definitions: a pinned problem file, or a frozen subset of one
-configs/         run configurations: a pinned checkpoint and its generation settings
-docs/            the grading rules
+benchmarks/      benchmark definitions: a pinned problem file, a frozen subset of one, or a Lean project pinned by commit
+configs/         run configurations: a pinned checkpoint, its generation settings, and the Lean instruction and limits
+data/            fetched problem files and Lean checkouts, never committed
+docs/            the grading rules for answers and for Lean proofs, and the run records
 experiments/     the experiment log, and the record of each run it cites
 src/pi/          the Python package
-tests/           tests, run with pytest
+tests/           tests, run with pytest; lean_cases/ holds the Lean grader's captured cases
 scripts/         the local check suite, the repository settings and the choice of development problems
 tools/           the commit message rule
 ```

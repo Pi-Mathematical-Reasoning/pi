@@ -47,11 +47,21 @@ class Probe:
 
 
 @dataclass(frozen=True)
+class LeanSettings:
+    instruction: str
+    compile_time_limit_seconds: float
+    judge_time_limit_seconds: float
+
+
+@dataclass(frozen=True)
 class Config:
     model: ModelPin
     runtime: Runtime
     generation: Generation
     probe: Probe
+    # Only a run on a Lean benchmark has this section; when it is present,
+    # every setting in it is required.
+    lean: LeanSettings | None = None
 
 
 def load_config(path: Path) -> Config:
@@ -63,11 +73,13 @@ def load_config(path: Path) -> Config:
     except tomllib.TOMLDecodeError as error:
         raise ConfigError(f"{path} is not valid TOML: {error}") from None
 
-    sections = {field.name: field.type for field in fields(Config)}
-    unknown = sorted(set(data) - set(sections))
+    sections = {field.name: field.type for field in fields(Config) if field.name != "lean"}
+    unknown = sorted(set(data) - set(sections) - {"lean"})
     if unknown:
         raise ConfigError(f"{path}: unknown section [{unknown[0]}]")
-    config = Config(**{name: _section(path, data, name, cls) for name, cls in sections.items()})
+    parts = {name: _section(path, data, name, cls) for name, cls in sections.items()}
+    lean = _section(path, data, "lean", LeanSettings) if "lean" in data else None
+    config = Config(**parts, lean=lean)
 
     generation = config.generation
     if generation.max_output_tokens >= generation.context_length:
@@ -76,6 +88,12 @@ def load_config(path: Path) -> Config:
             f"smaller than generation.context_length ({generation.context_length}), "
             "because the problem and the reply share the context"
         )
+    if lean is not None:
+        if not lean.instruction.strip():
+            raise ConfigError(f"{path}: lean.instruction must not be blank")
+        for setting in ("compile_time_limit_seconds", "judge_time_limit_seconds"):
+            if getattr(lean, setting) <= 0:
+                raise ConfigError(f"{path}: lean.{setting} must be greater than zero")
     return config
 
 

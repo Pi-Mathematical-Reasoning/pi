@@ -1,8 +1,12 @@
 """The `pi` command."""
 
 import argparse
+import contextlib
 import json
+import signal
 import sys
+import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,8 +14,21 @@ from pi.audit import AUDIT, REPORT, audit_run
 from pi.benchmarks import BenchmarkError, fetch_file, load_benchmark, load_problems
 from pi.checkpoint import CheckpointError
 from pi.config import ConfigError, load_config
-from pi.evaluation import RUN, EvaluationError, run_evaluation
+from pi.evaluation import RESULTS, RUN, EvaluationError, read_results, run_evaluation
 from pi.grading import grade, grader_version
+from pi.lean_audit import audit_lean_run
+from pi.lean_evaluation import LeanTask
+from pi.lean_grading import Limits
+from pi.lean_grading import check as check_proof
+from pi.lean_project import (
+    LeanBenchmark,
+    LeanRunner,
+    checkout_dir,
+    lean_environment,
+    load_theorems,
+    setup,
+)
+from pi.lean_statements import Theorem
 from pi.ollama import OllamaClient, OllamaError
 from pi.probe import run_probe, summarize
 from pi.publish import PublishError, publish_run, run_bucket
@@ -25,6 +42,34 @@ PROJECT_FILE = Path(__file__).resolve().parents[2] / "jaws.yaml"
 
 
 def main(argv: list[str] | None = None) -> int:
+    with termination_as_interrupt():
+        return _main(argv)
+
+
+@contextlib.contextmanager
+def termination_as_interrupt() -> Iterator[None]:
+    """Stop on SIGTERM and SIGHUP as on Ctrl-C, so the paths that kill Lean's process group run.
+
+    Without this the signal ends Python at once, and a check's processes outlive it with no
+    limit, since the limit is kept by the process that died. The old handlers come back after.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield  # only the main thread may set signal handlers
+        return
+
+    def interrupt(number, frame):
+        raise KeyboardInterrupt
+
+    numbers = (signal.SIGTERM, signal.SIGHUP)
+    previous = {number: signal.signal(number, interrupt) for number in numbers}
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
+def _main(argv: list[str] | None) -> int:
     arguments = sys.argv[1:] if argv is None else list(argv)
     options = _parser().parse_args(arguments)
     if options.command == "probe":
@@ -37,6 +82,10 @@ def main(argv: list[str] | None = None) -> int:
         return _audit(options)
     if options.command == "publish":
         return _publish(options)
+    if options.command == "lean-setup":
+        return _lean_setup(options)
+    if options.command == "lean-check":
+        return _lean_check(options)
     return _report(options)
 
 
@@ -47,7 +96,10 @@ def _audit(options: argparse.Namespace) -> int:
         if not (out / REPORT).exists():
             (out / REPORT).write_text(build_report(out))
             print(f"wrote {out / REPORT} from the records")
-        audit = audit_run(out, benchmark, options.data_dir)
+        if isinstance(benchmark, LeanBenchmark):  # hours of Lean: each re-check is shown
+            audit = audit_lean_run(out, benchmark, options.data_dir, report=_announce)
+        else:
+            audit = audit_run(out, benchmark, options.data_dir)
     except (OSError, ValueError, KeyError, BenchmarkError, EvaluationError) as error:
         return _fail(f"cannot audit {out}: {error}")
 
@@ -59,6 +111,68 @@ def _audit(options: argparse.Namespace) -> int:
     verdict = "audit passed" if audit["passed"] else "audit FAILED"
     print(f"{verdict}; written to {out / AUDIT}")
     return 0 if audit["passed"] else 1
+
+
+def _lean_setup(options: argparse.Namespace) -> int:
+    try:
+        setup(_lean_benchmark(options.benchmark), options.data_dir)
+    except BenchmarkError as error:
+        return _fail(error)
+    return 0
+
+
+def _lean_check(options: argparse.Namespace) -> int:
+    try:
+        config = load_config(options.config)
+        if config.lean is None:
+            raise ConfigError(f"{options.config} has no [lean] section, which sets the limits")
+        benchmark = _lean_benchmark(options.benchmark)
+        lean_environment(benchmark, options.data_dir)
+        theorem = _theorem(benchmark, options.data_dir, options.id)
+        if options.run is None:
+            reply = options.reply.read_text(encoding="utf-8")
+        else:
+            reply = _reply_in_run(options.run, options.id)
+        settings = config.lean
+        limits = Limits(settings.compile_time_limit_seconds, settings.judge_time_limit_seconds)
+        runner = LeanRunner(benchmark, options.data_dir)
+        result = check_proof(theorem, reply, runner, limits, benchmark.allowed_axioms)
+    except (
+        OSError,
+        UnicodeDecodeError,
+        ConfigError,
+        BenchmarkError,
+        EvaluationError,
+        ValueError,
+    ) as error:
+        return _fail(error)
+
+    print(result.verdict)
+    lean = result.lean
+    if lean is None:
+        print("  reason         no closed Lean code block in the reply")
+        return 0
+    judge_seconds = "not run" if lean["judge_seconds"] is None else f"{lean['judge_seconds']:.1f} s"
+    print(f"  reason         {lean['reason'] or 'none'}")
+    print(f"  axioms         {', '.join(lean['axioms']) or 'none'}")
+    print(f"  flags          {', '.join(lean['flags']) or 'none'}")
+    print(f"  compile        {lean['compile_seconds']:.1f} s")
+    print(f"  judge          {judge_seconds}")
+    return 0
+
+
+def _lean_benchmark(path: Path) -> LeanBenchmark:
+    benchmark = load_benchmark(path)
+    if not isinstance(benchmark, LeanBenchmark):
+        raise BenchmarkError(f'{path} is not a Lean benchmark (kind = "lean")')
+    return benchmark
+
+
+def _theorem(benchmark: LeanBenchmark, data_dir: Path, id: str) -> Theorem:
+    for theorem in load_theorems(benchmark, data_dir):
+        if theorem.id == id:
+            return theorem
+    raise BenchmarkError(f"{benchmark.name}: no theorem with id {id}")
 
 
 def _publish(options: argparse.Namespace) -> int:
@@ -115,6 +229,9 @@ def _eval(options: argparse.Namespace, arguments: list[str]) -> int:
     try:
         config = load_config(options.config)
         benchmark = load_benchmark(options.benchmark)
+        if isinstance(benchmark, LeanBenchmark):
+            _eval_lean(options, arguments, config, benchmark)
+            return _finished(options)
         fetched = fetch_file(benchmark, options.data_dir)
         for warning in fetched.warnings:
             print(f"warning: {warning}", file=sys.stderr)
@@ -147,6 +264,45 @@ def _eval(options: argparse.Namespace, arguments: list[str]) -> int:
             print(resume, file=sys.stderr)
         return status
 
+    return _finished(options)
+
+
+def _eval_lean(
+    options: argparse.Namespace, arguments: list[str], config, benchmark: LeanBenchmark
+) -> None:
+    """Run a Lean benchmark; nothing is written and no model is contacted until Lean is ready."""
+    if config.lean is None:
+        raise ConfigError(
+            f"{options.config} has no [lean] section, which holds the instruction and the limits"
+        )
+    environment = lean_environment(benchmark, options.data_dir)
+    theorems = load_theorems(benchmark, options.data_dir)
+    checkout = checkout_dir(options.data_dir, benchmark.repository, benchmark.commit)
+    print(f"lean project {checkout} at {benchmark.commit[:12]}", flush=True)
+    client = OllamaClient(config.runtime.host)
+    task = LeanTask(
+        benchmark,
+        config.lean,
+        LeanRunner(benchmark, options.data_dir),
+        environment,
+        options.out,
+        release=lambda: client.unload(config.model.name),
+    )
+    run_evaluation(
+        config,
+        benchmark,
+        theorems,
+        client,
+        ResourceSampler(interval=5),
+        options.out,
+        command=["pi", *arguments],
+        code=code_revision(Path(__file__).parent),
+        problem_file=f"{benchmark.repository}@{benchmark.commit}",
+        task=task,
+    )
+
+
+def _finished(options: argparse.Namespace) -> int:
     print(build_report(options.out).splitlines()[0].removeprefix("# "))
     print(f"results in {options.out}; `pi report {options.out}` prints the full report")
     return 0
@@ -165,6 +321,23 @@ def _report(options: argparse.Namespace) -> int:
         options.out.write_text(report)
         print(f"report written to {options.out}")
     return 0
+
+
+def _reply_in_run(run: Path, id: str) -> str:
+    """The visible reply saved in a run for one theorem: never the reasoning."""
+    found = [r for r in read_results(run) if isinstance(r, dict) and r.get("id") == id]
+    if len(found) != 1:
+        many = "no result" if not found else f"{len(found)} results"
+        raise EvaluationError(f"{run / RESULTS} has {many} for {id}")
+    response = found[0].get("response") or {}
+    content = response.get("content", "") if isinstance(response, dict) else ""
+    if not isinstance(content, str):
+        raise ValueError(f"{run / RESULTS}: the reply saved for {id} is not text")
+    return content
+
+
+def _announce(line: str) -> None:
+    print(line, flush=True)
 
 
 def _reply_in(record: Path) -> str:
@@ -236,6 +409,43 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("data"),
         help="where fetched problem files are kept (default: data)",
+    )
+
+    lean_setup = commands.add_parser(
+        "lean-setup",
+        help="check out and build a Lean benchmark's project and judge at their pinned commits",
+    )
+    lean_setup.add_argument(
+        "--benchmark", required=True, type=Path, help="the Lean benchmark definition, in TOML"
+    )
+    lean_setup.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="where checkouts are kept, under lean/ (default: data)",
+    )
+
+    lean_check = commands.add_parser(
+        "lean-check",
+        help="check one saved reply's proof of one theorem of a Lean benchmark with Lean",
+    )
+    lean_check.add_argument(
+        "--config", required=True, type=Path, help="the run configuration, with a [lean] section"
+    )
+    lean_check.add_argument(
+        "--benchmark", required=True, type=Path, help="the Lean benchmark definition, in TOML"
+    )
+    lean_check.add_argument("--id", required=True, help="the theorem's name")
+    reply = lean_check.add_mutually_exclusive_group(required=True)
+    reply.add_argument("--reply", type=Path, help="a file holding the reply, with its code block")
+    reply.add_argument(
+        "--run", type=Path, help="a run directory whose saved reply to the theorem to check"
+    )
+    lean_check.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="where checkouts are kept, under lean/ (default: data)",
     )
 
     publish = commands.add_parser(

@@ -31,8 +31,8 @@ from pi.resources import (
 RUN = "run.json"
 RESULTS = "results.jsonl"
 
-# What must be the same for two sessions to belong to one run.
-_IDENTITY = ("runtime", "model", "generation", "benchmark", "grader")
+# What must be the same for two sessions to belong to one run, besides what the task adds.
+_IDENTITY = ("runtime", "model", "generation")
 
 # How many times one problem is attempted again when the machine sleeps through it.
 _SLEEP_RETRIES = 3
@@ -40,6 +40,51 @@ _SLEEP_RETRIES = 3
 
 class EvaluationError(Exception):
     """The run cannot start or continue as asked."""
+
+
+class AnswerTask:
+    """A benchmark whose reply ends in an answer, graded against a reference answer."""
+
+    blank: dict = {}  # extra fields of an ungraded result
+
+    def identity(self, benchmark: Benchmark, problems: list[Problem]) -> dict:
+        """What, besides the model and its settings, must stay the same across sessions."""
+        return {
+            "benchmark": {
+                "name": benchmark.name,
+                "url": benchmark.url,
+                "sha256": benchmark.sha256,
+                "subset": benchmark.ids is not None,
+                "scored": benchmark.scored,
+                "ids": [problem.id for problem in problems],
+            },
+            "grader": grader_version(),
+        }
+
+    def check(self, problems: list[Problem]) -> None:
+        """Fail before the first attempt if any reference answer cannot be graded against."""
+        unreadable = []
+        for problem in problems:
+            try:
+                grade("", problem.answer)
+            except ValueError:
+                unreadable.append(problem.id)
+        if unreadable:
+            shown = ", ".join(unreadable[:5])
+            raise EvaluationError(
+                f"the grader cannot read the reference answer of {len(unreadable)} "
+                f"problem(s): {shown}"
+            )
+
+    def begin(self, problem: Problem) -> None:
+        """Called first in every attempt; an answer run keeps nothing outside its records."""
+
+    def prompt(self, problem: Problem) -> str:
+        return problem.problem
+
+    def grade(self, problem: Problem, content: str) -> dict:
+        graded = grade(content, problem.answer)
+        return {"verdict": graded.verdict, "answer": graded.answer}
 
 
 def run_evaluation(
@@ -60,6 +105,7 @@ def run_evaluation(
     read_machine=read_machine,
     verify_weights=verify_weights,
     read_thermal=read_thermal,
+    task=None,
 ) -> dict:
     """Attempt every problem that has no result yet, and return the run's description.
 
@@ -67,6 +113,7 @@ def run_evaluation(
     attempt, and a weights file whose content matches its checksum.
     """
     report = report or _announce
+    task = task or AnswerTask()
     out = Path(out)
     if benchmark.scored and (code is None or code["dirty"]):
         raise EvaluationError(
@@ -74,7 +121,7 @@ def run_evaluation(
             "and run pi from a git checkout"
         )
     checkpoint = inspect_checkpoint(config, client)
-    _check_references(problems)
+    task.check(problems)
     weights_verified = None
     if benchmark.scored:
         weights_verified = verify_weights(checkpoint["model"]["weights"])
@@ -92,20 +139,12 @@ def run_evaluation(
         "runtime": checkpoint["runtime"],
         "model": checkpoint["model"],
         "generation": asdict(config.generation),
-        "benchmark": {
-            "name": benchmark.name,
-            "url": benchmark.url,
-            "sha256": benchmark.sha256,
-            "subset": benchmark.ids is not None,
-            "scored": benchmark.scored,
-            "ids": [problem.id for problem in problems],
-        },
-        "grader": grader_version(),
+        **task.identity(benchmark, problems),
     }
 
     if (out / RUN).exists():
         run = json.loads((out / RUN).read_text())
-        for key in _IDENTITY:
+        for key in (*_IDENTITY, *task.identity(benchmark, problems)):
             if run.get(key) != identity[key]:
                 raise EvaluationError(
                     f"{out} holds a run with a different {key}; use another directory"
@@ -150,6 +189,7 @@ def run_evaluation(
                     report,
                     sampler,
                     read_thermal,
+                    task,
                 )
                 _check_runner(run, sampler, out)
                 result = {"session": index, **result}
@@ -172,7 +212,17 @@ def run_evaluation(
 
 
 def _attempt_awake(
-    config, client, problem, clock, read_power, read_wake, benchmark, report, sampler, read_thermal
+    config,
+    client,
+    problem,
+    clock,
+    read_power,
+    read_wake,
+    benchmark,
+    report,
+    sampler,
+    read_thermal,
+    task,
 ):
     """One attempt the machine stayed awake through.
 
@@ -191,7 +241,7 @@ def _attempt_awake(
                     "command again to resume"
                 )
         before = read_wake()
-        result = _attempt(config, client, problem, clock, read_power, sampler, read_thermal)
+        result = _attempt(config, client, problem, task, clock, read_power, sampler, read_thermal)
         if read_wake() == before:
             return {**result, "discarded_attempts": discarded}
         discarded.append(
@@ -218,7 +268,10 @@ def _check_runner(run: dict, sampler: ResourceSampler, out: Path) -> None:
     first settings seen are recorded; a different launch stops the run before the
     attempt it made is kept. Only the port, which changes at every load, is ignored.
     """
-    sampler.sample()  # the model of the attempt just made is still loaded
+    # In an answer run the model of the attempt just made is still loaded. A Lean run unloads
+    # it before its check, so this sample finds no runner and the commands stay those the
+    # attempt's own sample saw, taken while the model was loaded.
+    sampler.sample()
     seen = [_PORT.sub("", without_home(c)) for c in sampler.runner_commands]
     if not seen:
         return
@@ -254,11 +307,13 @@ def _attempt(
     config: Config,
     client: OllamaClient,
     problem: Problem,
+    task,
     clock,
     read_power,
     sampler: ResourceSampler | None = None,
     read_thermal=lambda: None,
 ) -> dict:
+    task.begin(problem)
     name = config.model.name
     # Battery or mains: the machine generates markedly slower on battery.
     power = read_power()
@@ -273,7 +328,7 @@ def _attempt(
     started_at = _now()
     started = clock()
     try:
-        reply = client.chat(name, problem.problem, config.generation)
+        reply = client.chat(name, task.prompt(problem), config.generation)
     except OllamaTimeout:
         reply = None
     elapsed = clock() - started
@@ -284,12 +339,11 @@ def _attempt(
 
     # An attempt that hits a limit is unsolved, whatever it had written.
     if reply is None:
-        verdict, answer = "timed_out", None
+        graded = {"verdict": "timed_out", "answer": None, **task.blank}
     elif reply.done_reason != "stop":
-        verdict, answer = "cut_off", None
+        graded = {"verdict": "cut_off", "answer": None, **task.blank}
     else:
-        graded = grade(reply.content, problem.answer)
-        verdict, answer = graded.verdict, graded.answer
+        graded = task.grade(problem, reply.content)
 
     speed = None
     if reply is not None and reply.output_seconds > 0:
@@ -299,8 +353,8 @@ def _attempt(
         "started_at": started_at,
         "subject": problem.subject,
         "level": problem.level,
-        "verdict": verdict,
-        "answer": answer,
+        "verdict": graded["verdict"],
+        "answer": graded["answer"],
         "response": None
         if reply is None
         else {
@@ -328,22 +382,8 @@ def _attempt(
         "power": power,
         # Everything Ollama reported about the attempt, as it reported it.
         "metrics": None if reply is None else reply.metrics,
+        **{key: value for key, value in graded.items() if key not in ("verdict", "answer")},
     }
-
-
-def _check_references(problems: list[Problem]) -> None:
-    """Fail before the first attempt if any reference answer cannot be graded against."""
-    unreadable = []
-    for problem in problems:
-        try:
-            grade("", problem.answer)
-        except ValueError:
-            unreadable.append(problem.id)
-    if unreadable:
-        shown = ", ".join(unreadable[:5])
-        raise EvaluationError(
-            f"the grader cannot read the reference answer of {len(unreadable)} problem(s): {shown}"
-        )
 
 
 def _announce(line: str) -> None:
@@ -354,9 +394,17 @@ def _announce(line: str) -> None:
 def _progress(position: int, total: int, result: dict) -> str:
     tokens = "-" if result["output_tokens"] is None else result["output_tokens"]
     return (
-        f"[{position}/{total}] {result['id']}  {result['verdict']}  "
+        f"[{position}/{total}] {result['id']}  {shown_verdict(result)}  "
         f"{tokens} tokens  {result['elapsed_seconds']:.1f} s"
     )
+
+
+def shown_verdict(result: dict) -> str:
+    """The verdict, and for a failed Lean result its reason: `failed (lean_error)`."""
+    lean = result.get("lean")  # only Lean results have it
+    if result["verdict"] == "failed" and isinstance(lean, dict) and lean.get("reason"):
+        return f"failed ({lean['reason']})"
+    return result["verdict"]
 
 
 def _write_results(out: Path, results: list[dict]) -> None:

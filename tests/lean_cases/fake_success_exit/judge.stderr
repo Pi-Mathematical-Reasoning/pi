@@ -1,0 +1,15 @@
+Currently running on Lean v4.27.0
+Running SafeVerify on target file: ../work/fake_success_exit/Target.olean and submission file: ../work/fake_success_exit/Submission.olean.
+------------------
+Replaying ../work/fake_success_exit/Target.olean
+Finished setting up the environment.
+Finished replay. Found 1 declarations.
+------------------
+Replaying ../work/fake_success_exit/Submission.olean
+Finished setting up the environment.
+Finished replay. Found 0 declarations.
+------------------
+------------------
+Found a problem in ../work/fake_success_exit/Submission.olean with declaration pi_case: declaration not found in submission
+------------------
+uncaught exception: SafeVerify check failed. For more diagnostic information about failures, run safe_verify with the -v (or --verbose) flag.

@@ -3,13 +3,25 @@
 import hashlib
 import io
 import json
+import os
+import signal
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
+import pytest
+
 from pi.cli import main
+from pi.lean_evaluation import lean_prompt
+from pi.lean_project import Finished, ensure_checkout, lean_environment
+from pi.lean_statements import split_theorems
+from tests.lean_fake import FakeRunner
 from tests.ollama_stub import DIGEST
+from tests.test_lean_project import make_repository
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 CONFIG = """
 [model]
@@ -287,6 +299,27 @@ def test_eval_stopped_from_the_keyboard_says_how_to_resume(ollama, tmp_path, cap
     assert "run the same command again to resume" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGHUP])
+def test_eval_stopped_by_a_termination_signal_says_how_to_resume(
+    ollama, tmp_path, capsys, monkeypatch, number
+):
+    before = signal.getsignal(number)
+
+    def terminated(*arguments, **options):
+        # Sent only once pi handles it: the default action would end the test run.
+        assert signal.getsignal(number) not in (signal.SIG_DFL, before)
+        os.kill(os.getpid(), number)
+        time.sleep(5)
+
+    monkeypatch.setattr("pi.cli.run_evaluation", terminated)
+
+    status = main(eval_arguments(tmp_path, ollama))
+
+    assert status == 130
+    assert "interrupted; the run is incomplete" in capsys.readouterr().err
+    assert signal.getsignal(number) == before
+
+
 def test_eval_explains_a_missing_benchmark_definition(ollama, tmp_path, capsys):
     arguments = eval_arguments(tmp_path, ollama)
     arguments[arguments.index("--benchmark") + 1] = str(tmp_path / "absent.toml")
@@ -451,3 +484,339 @@ def test_publish_refuses_a_run_that_was_not_audited(ollama, tmp_path, capsys, aw
 
     assert status == 1
     assert "pi audit" in capsys.readouterr().err
+
+
+def test_lean_setup_reports_a_benchmark_error_and_exits_1(tmp_path, capsys):
+    definition = tmp_path / "bad.toml"
+    definition.write_text('name = "x"\nkind = "lean"\nsurprise = 1\n')
+
+    assert main(["lean-setup", "--benchmark", str(definition), "--data-dir", str(tmp_path)]) == 1
+
+    assert capsys.readouterr().err.startswith("error: ")
+
+
+LEAN_SECTION = """
+[lean]
+instruction = "Prove it."
+compile_time_limit_seconds = 11
+judge_time_limit_seconds = 22
+"""
+
+
+def lean_check_setup(tmp_path, monkeypatch, runner, config_extra=LEAN_SECTION):
+    """A Lean benchmark in a local git repository, checked out, with Lean stood in for."""
+    source, commit = make_repository(tmp_path / "remote", "project")
+    judge, judge_commit = make_repository(tmp_path / "remote", "judge")
+    definition = tmp_path / "lean.toml"
+    definition.write_text(
+        f'name = "fixture-lean"\nkind = "lean"\nrepository = "{source}"\ncommit = "{commit}"\n'
+        'file = "Split.lean"\ntheorems = 8\nshipped_proofs = ["mathd_numbertheory_9002"]\n'
+        'lean_options = []\nallowed_axioms = ["propext"]\n'
+        f'judge_repository = "{judge}"\njudge_commit = "{judge_commit}"\n'
+    )
+    data = tmp_path / "data"
+    ensure_checkout(data, str(source), commit)
+    config = tmp_path / "lean-config.toml"
+    config.write_text(
+        CONFIG.format(host="http://127.0.0.1:9", digest=DIGEST, time_limit=30) + config_extra
+    )
+    checked = []
+    monkeypatch.setattr("pi.cli.lean_environment", lambda b, d: checked.append((b.name, d)))
+    monkeypatch.setattr("pi.cli.LeanRunner", lambda benchmark, data_dir: runner)
+    reply = tmp_path / "reply.txt"
+    reply.write_text(
+        "Here.\n```lean4\ntheorem fixture_add_zero (a : ℕ) : a + 0 = a := by\n  simp\n```\n",
+        encoding="utf-8",
+    )
+    arguments = ["lean-check", "--config", str(config), "--benchmark", str(definition)]
+    arguments += ["--id", "fixture_add_zero", "--reply", str(reply), "--data-dir", str(data)]
+    return arguments, checked
+
+
+def lean_outcome(axioms):
+    info = {"constInfo": {"kind": "theorem"}, "axioms": axioms}
+    return [["fixture_add_zero", {"targetInfo": info, "solutionInfo": info, "failureMode": None}]]
+
+
+def test_lean_check_grades_a_saved_reply_and_prints_the_verdict(tmp_path, monkeypatch, capsys):
+    runner = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 7.3)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 26.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    arguments, checked = lean_check_setup(tmp_path, monkeypatch, runner)
+
+    assert main(arguments) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "proved",
+        "  reason         none",
+        "  axioms         propext",
+        "  flags          none",
+        "  compile        7.3 s",
+        "  judge          26.0 s",
+    ]
+    assert checked == [("fixture-lean", tmp_path / "data")]
+    assert [call[-1] for call in runner.calls] == [11, 11, 22]
+    assert (
+        "theorem fixture_add_zero (a : ℕ) : a + 0 = a := by\n  simp\n"
+        in (runner.sources["Submission.lean"])
+    )
+
+
+def test_lean_check_prints_the_reason_a_proof_failed(tmp_path, monkeypatch, capsys):
+    runner = FakeRunner(compiles=[Finished(0, "", "", 1.0), Finished(1, "", "", 3.0)])
+    arguments, _ = lean_check_setup(tmp_path, monkeypatch, runner)
+
+    assert main(arguments) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:2] == ["failed", "  reason         lean_error"]
+    assert lines[-1] == "  judge          not run"
+
+
+def test_lean_check_needs_a_lean_section(tmp_path, monkeypatch, capsys):
+    arguments, _ = lean_check_setup(tmp_path, monkeypatch, FakeRunner(), config_extra="")
+
+    assert main(arguments) == 1
+
+    assert "[lean]" in capsys.readouterr().err
+
+
+def test_lean_check_explains_an_unknown_theorem(tmp_path, monkeypatch, capsys):
+    arguments, _ = lean_check_setup(tmp_path, monkeypatch, FakeRunner())
+    arguments[arguments.index("fixture_add_zero")] = "no_such_theorem"
+
+    assert main(arguments) == 1
+
+    assert "error: fixture-lean: no theorem with id no_such_theorem" in capsys.readouterr().err
+
+
+def test_lean_check_without_the_checkouts_says_to_run_lean_setup(tmp_path, capsys):
+    definition = REPO_ROOT / "benchmarks" / "minif2f-test.toml"
+    config = tmp_path / "lean-config.toml"
+    config.write_text(
+        CONFIG.format(host="http://127.0.0.1:9", digest=DIGEST, time_limit=30) + LEAN_SECTION
+    )
+    reply = tmp_path / "reply.txt"
+    reply.write_text("```lean4\nsimp\n```\n")
+    arguments = ["lean-check", "--config", str(config), "--benchmark", str(definition)]
+    arguments += ["--id", "x", "--reply", str(reply), "--data-dir", str(tmp_path / "data")]
+
+    assert main(arguments) == 1
+
+    error = capsys.readouterr().err
+    assert error.startswith("error: ") and "pi lean-setup" in error
+
+
+def test_lean_check_reports_a_reply_without_code_as_missing(tmp_path, monkeypatch, capsys):
+    runner = FakeRunner()
+    arguments, _ = lean_check_setup(tmp_path, monkeypatch, runner)
+    (tmp_path / "reply.txt").write_text("I could not prove it.\n")
+
+    assert main(arguments) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "missing",
+        "  reason         no closed Lean code block in the reply",
+    ]
+    assert runner.calls == []
+
+
+def lean_eval_setup(tmp_path, monkeypatch, ollama, runner, config_extra=LEAN_SECTION):
+    """A Lean benchmark of the fixture's first three theorems, with Lean stood in for."""
+    arguments, _ = lean_check_setup(tmp_path, monkeypatch, runner, config_extra)
+    definition = Path(arguments[arguments.index("--benchmark") + 1])
+    definition.write_text(
+        definition.read_text()
+        + 'ids = ["fixture_add_zero", "fixture_no_docstring", "amc12a_2099_p1"]\n'
+    )
+    config = Path(arguments[arguments.index("--config") + 1])
+    config.write_text(CONFIG.format(host=ollama.host, digest=DIGEST, time_limit=30) + config_extra)
+    environment = {
+        "toolchain": "leanprover/lean4:v4.99.0",
+        "lean_version": "Lean (version 4.99.0)",
+        "files": {"Split.lean": "ab" * 32},
+        "options": [],
+    }
+    monkeypatch.setattr("pi.cli.lean_environment", lambda b, d: environment)
+    out = tmp_path / "run"
+    eval_arguments = ["eval", "--config", str(config), "--benchmark", str(definition)]
+    eval_arguments += ["--out", str(out), "--data-dir", str(tmp_path / "data")]
+    return eval_arguments, definition, out
+
+
+def test_eval_of_a_lean_benchmark_runs_every_theorem_and_prints_the_score(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    theorem = split_theorems(Path("tests/lean_fixture/Split.lean").read_text(encoding="utf-8"))[0]
+    ollama.replies = {
+        lean_prompt("Prove it.", theorem): {
+            "content": "```lean4\ntheorem fixture_add_zero (a : ℕ) : a + 0 = a := by\n  simp\n```\n"
+        }
+    }
+    runner = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 2.0)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 3.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    arguments, _, out = lean_eval_setup(tmp_path, monkeypatch, ollama, runner)
+
+    assert main(arguments) == 0
+
+    printed = capsys.readouterr().out
+    assert f"lean project {tmp_path / 'data'}" in printed
+    assert "fixture-lean: 1 of 3 proved (33.3%)" in printed
+    assert [p.name for p in (out / "proofs").iterdir()] == ["fixture_add_zero.lean"]
+    run = json.loads((out / "run.json").read_text())
+    assert run["sessions"][0]["problem_file"].endswith(f"@{run['benchmark']['commit']}")
+
+
+def test_eval_of_a_lean_benchmark_needs_a_lean_section(ollama, tmp_path, monkeypatch, capsys):
+    arguments, _, out = lean_eval_setup(tmp_path, monkeypatch, ollama, FakeRunner(), "")
+
+    assert main(arguments) == 1
+
+    assert "[lean]" in capsys.readouterr().err
+    assert not out.exists()
+    assert ollama.requests == []
+
+
+def test_eval_stops_before_any_attempt_when_lean_is_not_set_up(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    arguments, _, out = lean_eval_setup(tmp_path, monkeypatch, ollama, FakeRunner())
+    monkeypatch.setattr("pi.cli.lean_environment", lean_environment)
+    arguments[arguments.index("--data-dir") + 1] = str(tmp_path / "empty")
+
+    assert main(arguments) == 1
+
+    assert "pi lean-setup" in capsys.readouterr().err
+    assert not out.exists()
+    assert ollama.requests_to("/api/chat") == []
+
+
+def test_audit_without_lean_set_up_says_so(ollama, tmp_path, monkeypatch, capsys):
+    theorem = split_theorems(Path("tests/lean_fixture/Split.lean").read_text(encoding="utf-8"))[0]
+    ollama.replies = {lean_prompt("Prove it.", theorem): {"content": "No idea."}}
+    arguments, definition, out = lean_eval_setup(tmp_path, monkeypatch, ollama, FakeRunner())
+    assert main(arguments) == 0
+
+    arguments = ["audit", str(out), "--benchmark", str(definition)]
+    assert main([*arguments, "--data-dir", str(tmp_path / "empty")]) == 1
+
+    error = capsys.readouterr().err
+    assert error.startswith(f"error: cannot audit {out}: ")
+    assert "pi lean-setup" in error
+    assert not (out / "audit.json").exists()
+
+
+def proved_lean_run(ollama, tmp_path, monkeypatch):
+    """A finished Lean run of three theorems, the first proved, made through `pi eval`."""
+    theorem = split_theorems(Path("tests/lean_fixture/Split.lean").read_text(encoding="utf-8"))[0]
+    statement = "theorem fixture_add_zero (a : ℕ) : a + 0 = a := by"
+    ollama.replies = {
+        lean_prompt("Prove it.", theorem): {
+            "content": f"```lean4\n{statement}\n  simp\n```\n",
+            "thinking": f"```lean4\n{statement}\n  omega\n```",
+        }
+    }
+    runner = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 2.0)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 3.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    arguments, definition, out = lean_eval_setup(tmp_path, monkeypatch, ollama, runner)
+    assert main(arguments) == 0
+    return definition, out
+
+
+def test_audit_of_a_sound_lean_run_reports_each_recheck_and_each_check(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    definition, out = proved_lean_run(ollama, tmp_path, monkeypatch)
+    run = json.loads((out / "run.json").read_text())
+    monkeypatch.setattr("pi.lean_audit.lean_environment", lambda b, d: dict(run["lean"]))
+    again = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 2.0)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 3.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    monkeypatch.setattr("pi.lean_audit.LeanRunner", lambda benchmark, data_dir: again)
+    capsys.readouterr()
+
+    status = main(
+        ["audit", str(out), "--benchmark", str(definition), "--data-dir", str(tmp_path / "data")]
+    )
+
+    printed = capsys.readouterr().out.splitlines()
+    assert status == 0
+    assert printed[0] == f"wrote {out / 'report.md'} from the records"
+    assert printed[1].startswith("[1/3] fixture_add_zero  proved  re-checked in ")
+    assert printed[2:] == [
+        "passed: complete",
+        "passed: benchmark",
+        "passed: lean environment",
+        "passed: one result per problem",
+        "passed: grader",
+        "passed: proof files",
+        "passed: sessions",
+        "passed: report",
+        "passed: verdicts",
+        f"audit passed; written to {out / 'audit.json'}",
+    ]
+    audit = json.loads((out / "audit.json").read_text())
+    assert audit["passed"] is True and "proofs/fixture_add_zero.lean" in audit["files"]
+
+
+def run_check_arguments(tmp_path, monkeypatch, ollama, runner):
+    definition, out = proved_lean_run(ollama, tmp_path, monkeypatch)
+    monkeypatch.setattr("pi.cli.LeanRunner", lambda benchmark, data_dir: runner)
+    arguments = ["lean-check", "--config", str(tmp_path / "lean-config.toml")]
+    arguments += ["--benchmark", str(definition), "--id", "fixture_add_zero"]
+    return arguments + ["--data-dir", str(tmp_path / "data")], out
+
+
+def test_lean_check_grades_the_reply_saved_in_a_run_and_never_its_reasoning(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    runner = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 7.3)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 26.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    arguments, out = run_check_arguments(tmp_path, monkeypatch, ollama, runner)
+    capsys.readouterr()
+
+    assert main([*arguments, "--run", str(out)]) == 0
+
+    assert capsys.readouterr().out.splitlines()[0] == "proved"
+    assert "  simp\n" in runner.sources["Submission.lean"]
+    assert "omega" not in runner.sources["Submission.lean"]
+
+
+def test_lean_check_explains_a_theorem_the_run_has_no_result_for(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    arguments, out = run_check_arguments(tmp_path, monkeypatch, ollama, FakeRunner())
+    rows = (out / "results.jsonl").read_text().splitlines()
+    (out / "results.jsonl").write_text("\n".join(rows[1:]) + "\n")
+    capsys.readouterr()
+
+    assert main([*arguments, "--run", str(out)]) == 1
+
+    assert capsys.readouterr().err == (
+        f"error: {out / 'results.jsonl'} has no result for fixture_add_zero\n"
+    )
+
+
+def test_lean_check_takes_exactly_one_of_a_reply_and_a_run(tmp_path, monkeypatch, capsys):
+    arguments, _ = lean_check_setup(tmp_path, monkeypatch, FakeRunner())
+    reply = arguments.index("--reply")
+    neither = arguments[:reply] + arguments[reply + 2 :]
+
+    for wrong in (neither, [*arguments, "--run", str(tmp_path)]):
+        with pytest.raises(SystemExit) as stopped:
+            main(wrong)
+        assert stopped.value.code == 2
+    assert "--reply" in capsys.readouterr().err

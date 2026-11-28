@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from pi.audit import AUDIT, audit_run
+from pi.audit import AUDIT, audit_run, fingerprint
 from pi.publish import PublishError, publish_run, run_bucket
 from pi.s3 import AwsCli
 from tests.test_audit import finished  # noqa: F401  (the fixture)
@@ -109,3 +109,144 @@ def test_the_committed_project_file_names_the_bucket():
 
 def calls(aws):
     return [json.loads(line) for line in (aws / "calls.jsonl").read_text().splitlines()]
+
+
+PROOF = "proofs/fixture_add_zero.lean"
+
+
+@pytest.fixture
+def audited_with_proofs(audited):
+    (audited / "proofs").mkdir()
+    (audited / PROOF).write_text("theorem fixture_add_zero : 0 + 0 = 0 := rfl\n")
+    audit = json.loads((audited / AUDIT).read_text())
+    audit["files"][PROOF] = fingerprint(audited / PROOF)
+    (audited / AUDIT).write_text(json.dumps(audit))
+    return audited
+
+
+def test_publishes_every_file_the_audit_names(aws, audited_with_proofs):
+    outcome = publish_run(audited_with_proofs, BUCKET, AwsCli())
+
+    assert outcome[PROOF] == "uploaded"
+    assert (
+        stored(aws, audited_with_proofs, PROOF).read_bytes()
+        == (audited_with_proofs / PROOF).read_bytes()
+    )
+    manifest = json.loads(stored(aws, audited_with_proofs, "_manifest.json").read_text())
+    assert PROOF in manifest["files"]
+    assert list(outcome)[-2:] == ["audit.json", "_manifest.json"]
+
+
+def test_refuses_when_a_proof_file_changed_since_the_audit(aws, audited_with_proofs):
+    (audited_with_proofs / PROOF).write_text("theorem other : True := trivial\n")
+
+    with pytest.raises(PublishError, match="fixture_add_zero.lean"):
+        publish_run(audited_with_proofs, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()
+
+
+def test_refuses_when_a_proof_file_is_missing(aws, audited_with_proofs):
+    (audited_with_proofs / PROOF).unlink()
+
+    with pytest.raises(PublishError, match="fixture_add_zero.lean"):
+        publish_run(audited_with_proofs, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()
+
+
+def test_refuses_a_proof_file_the_audit_does_not_name(aws, audited_with_proofs):
+    (audited_with_proofs / "proofs/extra.lean").write_text("import Mathlib\n")
+
+    with pytest.raises(PublishError, match="extra.lean"):
+        publish_run(audited_with_proofs, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()
+
+
+@pytest.mark.parametrize("name", [".DS_Store", "fixture_add_zero.lean~"])
+def test_a_stray_entry_in_the_proofs_folder_is_named_with_what_to_do(
+    aws, audited_with_proofs, name
+):
+    (audited_with_proofs / "proofs" / name).write_text("stray")
+
+    with pytest.raises(PublishError) as refused:
+        publish_run(audited_with_proofs, BUCKET, AwsCli())
+
+    assert str(refused.value) == (
+        f"proofs/{name} is not one of the proof files the audit checked: "
+        "remove it, then run `pi publish` again"
+    )
+    assert not (aws / BUCKET).exists()
+    (audited_with_proofs / "proofs" / name).unlink()  # doing what the message says works
+    assert publish_run(audited_with_proofs, BUCKET, AwsCli())[PROOF] == "uploaded"
+
+
+@pytest.mark.parametrize("name", ["../outside.txt", "/etc/hosts", "proofs/../../x"])
+def test_refuses_a_name_that_leaves_the_run_directory(aws, audited, name):
+    audit = json.loads((audited / AUDIT).read_text())
+    audit["files"][name] = {"sha256": "0", "size": 0}
+    (audited / AUDIT).write_text(json.dumps(audit))
+
+    with pytest.raises(PublishError, match="outside"):
+        publish_run(audited, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()
+
+
+def test_an_answer_run_publishes_the_same_four_files_as_before(aws, audited):
+    publish_run(audited, BUCKET, AwsCli())
+
+    keys = [
+        call[call.index("--key") + 1].split("/")[-1]
+        for call in calls(aws)
+        if call[1] == "put-object"
+    ]
+    assert [k for k in keys if k != "_manifest.json"][:4] == FILES
+    manifest = json.loads(stored(aws, audited, "_manifest.json").read_text())
+    assert list(manifest["files"]) == FILES
+
+
+def _audit_naming(out, names):
+    audit = json.loads((out / AUDIT).read_text())
+    for name in names:
+        audit["files"][name] = fingerprint(out / name)
+    (out / AUDIT).write_text(json.dumps(audit))
+
+
+def test_refuses_a_proof_file_that_is_a_symlink_to_a_file_outside(aws, audited, tmp_path):
+    outside = tmp_path / "outside.lean"
+    outside.write_text("theorem secret : True := trivial\n")
+    (audited / "proofs").mkdir()
+    (audited / PROOF).symlink_to(outside)
+    _audit_naming(audited, [PROOF])
+
+    with pytest.raises(PublishError, match="fixture_add_zero.lean.*(symbolic link|outside)"):
+        publish_run(audited, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()
+
+
+def test_refuses_a_proofs_directory_that_is_a_symlink(aws, audited, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "fixture_add_zero.lean").write_text("theorem secret : True := trivial\n")
+    (audited / "proofs").symlink_to(elsewhere, target_is_directory=True)
+    _audit_naming(audited, [PROOF])
+
+    with pytest.raises(PublishError, match="proofs.*(symbolic link|outside)"):
+        publish_run(audited, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()
+
+
+def test_refuses_a_standard_file_that_is_a_symlink_to_an_identical_copy(aws, audited, tmp_path):
+    copy = tmp_path / "results-copy.jsonl"
+    copy.write_bytes((audited / "results.jsonl").read_bytes())
+    (audited / "results.jsonl").unlink()
+    (audited / "results.jsonl").symlink_to(copy)
+
+    with pytest.raises(PublishError, match="results.jsonl.*(symbolic link|outside)"):
+        publish_run(audited, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()

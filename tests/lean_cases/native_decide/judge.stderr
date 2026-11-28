@@ -1,0 +1,10 @@
+Currently running on Lean v4.27.0
+Running SafeVerify on target file: ../work/native_decide/Target.olean and submission file: ../work/native_decide/Submission.olean.
+------------------
+Replaying ../work/native_decide/Target.olean
+Finished setting up the environment.
+Finished replay. Found 1 declarations.
+------------------
+Replaying ../work/native_decide/Submission.olean
+Finished setting up the environment.
+uncaught exception: (kernel) (interpreter) unknown declaration 'pi_case._nativeDecide_1_1'

@@ -7,7 +7,7 @@ import pytest
 from pi.benchmarks import Benchmark, Problem
 from pi.checkpoint import CheckpointError
 from pi.config import Config, Generation, ModelPin, Probe, Runtime
-from pi.evaluation import EvaluationError, read_results, run_evaluation
+from pi.evaluation import AnswerTask, EvaluationError, read_results, run_evaluation
 from pi.ollama import OllamaClient, OllamaError
 from pi.resources import OllamaTree, ResourceSampler
 from tests.ollama_stub import DIGEST
@@ -317,3 +317,70 @@ def test_a_session_records_peak_memory_swap_growth_and_the_runner_command(ollama
     assert session["peak_memory_bytes"] == 900
     assert session["swap_growth_bytes"] == 40
     assert session["runner_commands"] == ["llama-server -c 16384"]
+
+
+class Shouting(AnswerTask):
+    blank = {"extra": None}
+
+    def identity(self, benchmark, problems):
+        return {**super().identity(benchmark, problems), "loud": True}
+
+    def prompt(self, problem):
+        return problem.problem.upper()
+
+    def grade(self, problem, content):
+        return {"verdict": "correct", "answer": None, "extra": len(content)}
+
+
+def test_a_task_writes_the_prompt_and_adds_its_fields_after_the_rest(ollama, tmp_path):
+    ollama.replies = {ONE.problem.upper(): {"content": "hello"}}
+
+    evaluate(ollama, tmp_path / "run", problems=[ONE], task=Shouting())
+
+    assert chats(ollama)[0][0]["content"] == ONE.problem.upper()
+    [result] = read_results(tmp_path / "run")
+    assert result["verdict"] == "correct"
+    assert result["extra"] == len("hello")
+    assert list(result).index("extra") == list(result).index("metrics") + 1
+
+
+def test_an_ungraded_result_carries_the_task_s_blank_fields(ollama, tmp_path):
+    ollama.replies[ONE.problem.upper()] = {"content": "hello", "done_reason": "length"}
+
+    evaluate(ollama, tmp_path / "run", problems=[ONE], task=Shouting())
+
+    [result] = read_results(tmp_path / "run")
+    assert result["verdict"] == "cut_off"
+    assert result["extra"] is None
+
+
+def test_a_run_records_and_compares_every_identity_key_of_its_task(ollama, tmp_path):
+    class Quiet(Shouting):
+        def identity(self, benchmark, problems):
+            return {**super().identity(benchmark, problems), "loud": False}
+
+    ollama.replies = {ONE.problem.upper(): {"content": "hello"}}
+    evaluate(ollama, tmp_path / "run", problems=[ONE], task=Shouting())
+
+    assert json.loads((tmp_path / "run" / "run.json").read_text())["loud"] is True
+    with pytest.raises(EvaluationError, match="different loud"):
+        evaluate(ollama, tmp_path / "run", problems=[ONE], task=Quiet())
+
+
+def test_a_task_is_told_to_begin_each_attempt_before_the_model_is_contacted(ollama, tmp_path):
+    began = []
+
+    class Beginning(Shouting):
+        def begin(self, problem):
+            began.append((problem.id, len(ollama.requests)))
+
+    ollama.replies = {p.problem.upper(): {"content": "hello"} for p in PROBLEMS}
+
+    evaluate(ollama, tmp_path / "run", task=Beginning())
+
+    assert [id for id, _ in began] == ["dev/1", "dev/2", "dev/3"]
+    # Each began before anything of its own attempt reached the server (unload, then chat).
+    contacted = [count for _, count in began]
+    assert contacted == sorted(set(contacted)) and len(ollama.requests_to("/api/chat")) == 3
+    first_chat = next(i for i, r in enumerate(ollama.requests) if r[1] == "/api/chat")
+    assert contacted[0] < first_chat

@@ -1,0 +1,17 @@
+Currently running on Lean v4.27.0
+Running SafeVerify on target file: ../work/helper_sorry/Target.olean and submission file: ../work/helper_sorry/Submission.olean.
+------------------
+Replaying ../work/helper_sorry/Target.olean
+Finished setting up the environment.
+Finished replay. Found 1 declarations.
+------------------
+Replaying ../work/helper_sorry/Submission.olean
+Finished setting up the environment.
+Finished replay. Found 2 declarations.
+------------------
+pi_helper used disallowed axioms. #[sorryAx]
+pi_case used disallowed axioms. #[sorryAx]
+------------------
+Found a problem in ../work/helper_sorry/Submission.olean with declaration pi_case: uses disallowed axioms
+------------------
+uncaught exception: SafeVerify check failed. For more diagnostic information about failures, run safe_verify with the -v (or --verbose) flag.

@@ -314,7 +314,7 @@ def test_every_committed_mirror_names_its_files_checksum(tmp_path):
 
     for path in definitions:
         benchmark = load_benchmark(path)
-        if benchmark.mirror is not None:
+        if isinstance(benchmark, Benchmark) and benchmark.mirror is not None:
             assert f"/{benchmark.sha256}/" in benchmark.mirror, path.name
 
 
@@ -328,9 +328,9 @@ def test_refuses_a_scored_setting_that_is_not_true_or_false(tmp_path):
         load_benchmark(write(tmp_path, DEFINITION + 'scored = "yes"\n'))
 
 
-def test_only_math_500_is_scored():
+def test_only_the_two_evaluation_benchmarks_are_scored():
     definitions = sorted((Path(__file__).parent.parent / "benchmarks").glob("*.toml"))
 
     scored = {path.stem for path in definitions if load_benchmark(path).scored}
 
-    assert scored == {"math-500"}
+    assert scored == {"math-500", "minif2f-test"}

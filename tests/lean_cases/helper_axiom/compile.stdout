@@ -1,0 +1,1 @@
+{"caption":"","data":"unused variable `h`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`","endPos":{"column":28,"line":5},"fileName":"../work/helper_axiom/Submission.lean","isSilent":false,"keepFullRange":false,"kind":"linter.unusedVariables","pos":{"column":27,"line":5},"severity":"warning"}

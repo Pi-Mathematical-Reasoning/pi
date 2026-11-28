@@ -16,6 +16,10 @@ def build_report(out: Path) -> str:
     run = json.loads((out / RUN).read_text())
     results = read_results(out)
     benchmark = run["benchmark"]
+    if benchmark.get("kind") == "lean":
+        from pi.lean_report import build_lean_report  # it imports this module's helpers
+
+        return build_lean_report(run, results)
     total = len(benchmark["ids"])
     correct = sum(result["verdict"] == "correct" for result in results)
 

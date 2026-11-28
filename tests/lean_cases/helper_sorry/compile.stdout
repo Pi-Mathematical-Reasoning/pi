@@ -1,0 +1,2 @@
+{"caption":"","data":"declaration uses 'sorry'","endPos":{"column":15,"line":3},"fileName":"../work/helper_sorry/Submission.lean","isSilent":false,"keepFullRange":false,"kind":"hasSorry","pos":{"column":6,"line":3},"severity":"warning"}
+{"caption":"","data":"unused variable `h`\n\nNote: This linter can be disabled with `set_option linter.unusedVariables false`","endPos":{"column":28,"line":5},"fileName":"../work/helper_sorry/Submission.lean","isSilent":false,"keepFullRange":false,"kind":"linter.unusedVariables","pos":{"column":27,"line":5},"severity":"warning"}
