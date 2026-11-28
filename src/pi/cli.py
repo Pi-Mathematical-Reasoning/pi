@@ -12,7 +12,10 @@ from pi.checkpoint import CheckpointError
 from pi.config import ConfigError, load_config
 from pi.evaluation import RUN, EvaluationError, run_evaluation
 from pi.grading import grade, grader_version
-from pi.lean_project import LeanBenchmark, setup
+from pi.lean_grading import Limits
+from pi.lean_grading import check as check_proof
+from pi.lean_project import LeanBenchmark, LeanRunner, lean_environment, load_theorems, setup
+from pi.lean_statements import Theorem
 from pi.ollama import OllamaClient, OllamaError
 from pi.probe import run_probe, summarize
 from pi.publish import PublishError, publish_run, run_bucket
@@ -40,6 +43,8 @@ def main(argv: list[str] | None = None) -> int:
         return _publish(options)
     if options.command == "lean-setup":
         return _lean_setup(options)
+    if options.command == "lean-check":
+        return _lean_check(options)
     return _report(options)
 
 
@@ -66,13 +71,54 @@ def _audit(options: argparse.Namespace) -> int:
 
 def _lean_setup(options: argparse.Namespace) -> int:
     try:
-        benchmark = load_benchmark(options.benchmark)
-        if not isinstance(benchmark, LeanBenchmark):
-            raise BenchmarkError(f'{options.benchmark} is not a Lean benchmark (kind = "lean")')
-        setup(benchmark, options.data_dir)
+        setup(_lean_benchmark(options.benchmark), options.data_dir)
     except BenchmarkError as error:
         return _fail(error)
     return 0
+
+
+def _lean_check(options: argparse.Namespace) -> int:
+    try:
+        config = load_config(options.config)
+        if config.lean is None:
+            raise ConfigError(f"{options.config} has no [lean] section, which sets the limits")
+        benchmark = _lean_benchmark(options.benchmark)
+        lean_environment(benchmark, options.data_dir)
+        theorem = _theorem(benchmark, options.data_dir, options.id)
+        reply = options.reply.read_text(encoding="utf-8")
+        settings = config.lean
+        limits = Limits(settings.compile_time_limit_seconds, settings.judge_time_limit_seconds)
+        runner = LeanRunner(benchmark, options.data_dir)
+        result = check_proof(theorem, reply, runner, limits, benchmark.allowed_axioms)
+    except (OSError, UnicodeDecodeError, ConfigError, BenchmarkError) as error:
+        return _fail(error)
+
+    print(result.verdict)
+    lean = result.lean
+    if lean is None:
+        print("  reason         no closed Lean code block in the reply")
+        return 0
+    judge_seconds = "not run" if lean["judge_seconds"] is None else f"{lean['judge_seconds']:.1f} s"
+    print(f"  reason         {lean['reason'] or 'none'}")
+    print(f"  axioms         {', '.join(lean['axioms']) or 'none'}")
+    print(f"  flags          {', '.join(lean['flags']) or 'none'}")
+    print(f"  compile        {lean['compile_seconds']:.1f} s")
+    print(f"  judge          {judge_seconds}")
+    return 0
+
+
+def _lean_benchmark(path: Path) -> LeanBenchmark:
+    benchmark = load_benchmark(path)
+    if not isinstance(benchmark, LeanBenchmark):
+        raise BenchmarkError(f'{path} is not a Lean benchmark (kind = "lean")')
+    return benchmark
+
+
+def _theorem(benchmark: LeanBenchmark, data_dir: Path, id: str) -> Theorem:
+    for theorem in load_theorems(benchmark, data_dir):
+        if theorem.id == id:
+            return theorem
+    raise BenchmarkError(f"{benchmark.name}: no theorem with id {id}")
 
 
 def _publish(options: argparse.Namespace) -> int:
@@ -260,6 +306,27 @@ def _parser() -> argparse.ArgumentParser:
         "--benchmark", required=True, type=Path, help="the Lean benchmark definition, in TOML"
     )
     lean_setup.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path("data"),
+        help="where checkouts are kept, under lean/ (default: data)",
+    )
+
+    lean_check = commands.add_parser(
+        "lean-check",
+        help="check one saved reply's proof of one theorem of a Lean benchmark with Lean",
+    )
+    lean_check.add_argument(
+        "--config", required=True, type=Path, help="the run configuration, with a [lean] section"
+    )
+    lean_check.add_argument(
+        "--benchmark", required=True, type=Path, help="the Lean benchmark definition, in TOML"
+    )
+    lean_check.add_argument("--id", required=True, help="the theorem's name")
+    lean_check.add_argument(
+        "--reply", required=True, type=Path, help="a file holding the reply, with its code block"
+    )
+    lean_check.add_argument(
         "--data-dir",
         type=Path,
         default=Path("data"),

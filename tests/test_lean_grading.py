@@ -5,9 +5,22 @@ from pathlib import Path
 
 import pytest
 
-from pi.lean_grading import assemble, extract_code, flags, judgement, reference_source
-from pi.lean_project import Finished
+from pi.lean_grading import (
+    LEAN_RULES_VERSION,
+    MESSAGE_CAP,
+    LeanGrade,
+    Limits,
+    assemble,
+    check,
+    extract_code,
+    flags,
+    judgement,
+    lean_grader_version,
+    reference_source,
+)
+from pi.lean_project import Finished, LeanBenchmark
 from pi.lean_statements import Theorem
+from tests.lean_fake import FakeRunner
 
 CASES = Path(__file__).parent / "lean_cases"
 ALLOWED = ["propext", "Classical.choice", "Quot.sound"]
@@ -236,3 +249,206 @@ def test_a_kernel_message_wins_over_a_saved_pass():
     assert judgement(done, PASSING_OUTCOME, ALLOWED, "pi_case")[0] == "kernel_rejected"
     done = Finished(1, "", "kernel verification failed for 'x'", 1.0)
     assert judgement(done, None, ALLOWED, "pi_case")[0] == "kernel_rejected"
+
+
+# Checking one reply: the two compiles and the judge, run by a stand-in for Lean.
+
+LIMITS = Limits(300, 300)
+OK = Finished(0, "", "", 1.5)
+JUDGED = Finished(0, "", "SafeVerify check passed.\n", 3.0)
+PASSING = [["fixture_add_zero", outcome(["propext"])]]
+
+
+def passing_runner(**changes):
+    values = {"compiles": [OK, Finished(0, "", "", 2.0)], "judges": [JUDGED], "saved": [PASSING]}
+    return FakeRunner(**{**values, **changes})
+
+
+def test_a_reply_without_code_is_missing_and_runs_nothing():
+    runner = FakeRunner()
+    assert check(T, "I could not prove it.", runner, LIMITS, ALLOWED) == LeanGrade(
+        "missing", None, None, None
+    )
+    assert runner.calls == []
+
+
+def test_a_proof_the_judge_passes_is_proved_with_its_axioms_flags_and_times():
+    code = "#eval 1\n\n" + FULL
+    runner = passing_runner()
+    grade = check(T, fenced(code), runner, LIMITS, ALLOWED)
+    assert grade.verdict == "proved"
+    assert grade.proof == code
+    assert grade.lean == {
+        "reason": None,
+        "exit_code": 0,
+        "messages": "",
+        "judge": {"exit_code": 0, "outcome": PASSING, "stderr": "SafeVerify check passed.\n"},
+        "axioms": ["propext"],
+        "flags": ["#eval"],
+        "compile_seconds": 2.0,
+        "judge_seconds": 3.0,
+    }
+    assert runner.calls == [
+        ("compile", "Reference.lean", "Reference.olean", 300),
+        ("compile", "Submission.lean", "Submission.olean", 300),
+        ("judge", "Reference.olean", "Submission.olean", "judge.json", 300),
+    ]
+
+
+def test_each_step_runs_under_its_own_limit():
+    runner = passing_runner()
+    check(T, fenced(FULL), runner, Limits(5, 7), ALLOWED)
+    assert [call[-1] for call in runner.calls] == [5, 5, 7]
+
+
+def test_a_compile_error_fails_without_asking_the_judge():
+    error = '{"severity": "error", "data": "unknown tactic"}\n'
+    runner = FakeRunner(compiles=[OK, Finished(1, error, "", 2.0)])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "lean_error")
+    assert (grade.lean["exit_code"], grade.lean["messages"]) == (1, error)
+    assert grade.lean["judge"] is None and grade.lean["judge_seconds"] is None
+    assert grade.lean["axioms"] == []
+    assert runner.judge_calls() == []
+
+
+def test_an_error_message_fails_even_when_lean_exits_zero():
+    stdout = 'not json\n{"severity": "warning"}\n{"severity": "error", "data": "x"}\n'
+    runner = FakeRunner(compiles=[OK, Finished(0, stdout, "", 2.0)])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert grade.lean["reason"] == "lean_error"
+    assert runner.judge_calls() == []
+
+
+def test_lines_that_are_not_error_messages_do_not_fail_a_compile():
+    stdout = 'severity: error\n{"severity": "warning", "data": "declaration uses sorry"}\n[1]\n'
+    runner = passing_runner(compiles=[OK, Finished(0, stdout, "", 2.0)])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert grade.verdict == "proved"
+
+
+def test_a_compile_killed_at_its_limit_is_a_timeout():
+    runner = FakeRunner(compiles=[OK, Finished(None, "", "", 300.0)])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "check_timed_out")
+    assert grade.lean["exit_code"] is None and grade.lean["compile_seconds"] == 300.0
+    assert runner.judge_calls() == []
+
+
+@pytest.mark.parametrize(
+    "done", [Finished(1, "", "boom", 1.0), Finished(0, '{"severity": "error"}\n', "", 1.0)]
+)
+def test_a_reference_that_does_not_compile_is_a_judge_error(done):
+    runner = FakeRunner(compiles=[done])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert [call[1] for call in runner.calls] == ["Reference.lean"]
+    assert grade.submission == assemble(T, FULL)
+
+
+def test_a_reference_compile_that_leaves_no_olean_is_a_judge_error():
+    runner = FakeRunner(compiles=[OK], on_compile=lambda source, olean: olean.unlink())
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert grade.lean["reason"] == "judge_error"
+    assert [call[1] for call in runner.calls] == ["Reference.lean"]
+
+
+def test_a_reference_compile_killed_at_its_limit_is_a_timeout():
+    runner = FakeRunner(compiles=[Finished(None, "", "", 300.0)])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "check_timed_out")
+    assert len(runner.calls) == 1
+
+
+def _rewrite_reference(source, olean):
+    if source.name == "Submission.lean":
+        (olean.parent / "Reference.olean").write_bytes(b"a different reference")
+
+
+def test_a_reference_that_changed_before_the_judge_ran_is_a_judge_error():
+    runner = passing_runner(on_compile=_rewrite_reference)
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert runner.judge_calls() == []
+
+
+def test_a_reference_removed_before_the_judge_ran_is_a_judge_error():
+    def remove(source, olean):
+        if source.name == "Submission.lean":
+            (olean.parent / "Reference.olean").unlink()
+
+    runner = passing_runner(on_compile=remove)
+    assert check(T, fenced(FULL), runner, LIMITS, ALLOWED).lean["reason"] == "judge_error"
+    assert runner.judge_calls() == []
+
+
+@pytest.mark.parametrize("saved", [None, b'[["fixture_add_zero", {', b"\xff\xfe"])
+def test_a_judge_pass_without_a_readable_saved_outcome_is_a_judge_error(saved):
+    grade = check(T, fenced(FULL), passing_runner(saved=[saved]), LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "judge_error")
+    assert grade.lean["judge"]["outcome"] is None
+
+
+def test_a_judge_failure_fails_with_its_reason():
+    sorry = [["fixture_add_zero", outcome(["sorryAx"], failure="axioms")]]
+    runner = passing_runner(judges=[Finished(1, "", "", 3.0)], saved=[sorry])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert (grade.verdict, grade.lean["reason"]) == ("failed", "sorry")
+    assert grade.lean["axioms"] == ["sorryAx"]
+
+
+def test_saved_output_is_capped():
+    runner = FakeRunner(compiles=[OK, Finished(1, "x" * 50_000, "", 2.0)])
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert len(grade.lean["messages"]) == MESSAGE_CAP
+
+
+def test_the_judge_s_stderr_is_capped_and_stderr_follows_stdout():
+    runner = passing_runner(
+        compiles=[OK, Finished(0, "out\n", "err\n", 2.0)],
+        judges=[Finished(0, "", "y" * 50_000, 3.0)],
+    )
+    grade = check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert grade.lean["messages"] == "out\nerr\n"
+    assert len(grade.lean["judge"]["stderr"]) == MESSAGE_CAP
+
+
+def test_the_submission_is_what_assemble_built():
+    runner = passing_runner()
+    grade = check(T, fenced("simp"), runner, LIMITS, ALLOWED)
+    assert grade.submission == assemble(T, "simp")
+    assert runner.sources == {
+        "Reference.lean": reference_source(T),
+        "Submission.lean": grade.submission,
+    }
+
+
+def test_the_work_directory_is_removed_even_when_the_runner_raises():
+    def explode(source, olean):
+        raise RuntimeError("lean crashed")
+
+    runner = FakeRunner(compiles=[OK], on_compile=explode)
+    with pytest.raises(RuntimeError):
+        check(T, fenced(FULL), runner, LIMITS, ALLOWED)
+    assert runner.work is not None and not runner.work.exists()
+
+
+def test_the_grader_version_names_the_rules_the_judge_and_the_allowlist():
+    benchmark = LeanBenchmark(
+        name="b",
+        repository="https://example.com/p",
+        commit="a" * 40,
+        file="A.lean",
+        theorems=1,
+        shipped_proofs=(),
+        lean_options=(),
+        allowed_axioms=("propext", "Quot.sound"),
+        judge_repository="https://example.com/j",
+        judge_commit="b" * 40,
+    )
+    assert lean_grader_version(benchmark) == {
+        "lean_rules": LEAN_RULES_VERSION,
+        "judge_repository": "https://example.com/j",
+        "judge_commit": "b" * 40,
+        "allowed_axioms": ["propext", "Quot.sound"],
+    }

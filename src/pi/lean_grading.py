@@ -1,15 +1,20 @@
 """Lean rules version 1: turn a reply into a Lean file and the judge's output into a verdict.
 
 A proof passes only on positive confirmation from the judge (SafeVerify): exit status 0 and a
-saved outcome that says so. Anything unexpected, missing or unparsable is a failure with a
-reason. Nothing here runs Lean.
+saved outcome that says so, for a reference compiled here that did not change before the judge
+ran. Anything unexpected, missing or unparsable is a failure with a reason. Only `check` runs
+Lean, through the runner it is given.
 """
 
+import hashlib
+import json
 import re
 import textwrap
 from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 
-from pi.lean_project import Finished
+from pi.lean_project import Finished, LeanBenchmark
 from pi.lean_statements import Theorem
 
 LEAN_RULES_VERSION = 1
@@ -173,3 +178,131 @@ def judgement(
                 return "axioms", axioms
             return None, axioms
     return "judge_error", axioms
+
+
+# Checking one reply: compile the reference and the submission, then ask the judge.
+
+
+@dataclass(frozen=True)
+class Limits:
+    compile_seconds: float
+    judge_seconds: float
+
+
+@dataclass(frozen=True)
+class LeanGrade:
+    verdict: str  # "proved", "failed" or "missing"
+    proof: str | None  # the extracted block
+    submission: str | None  # the file as checked
+    lean: dict | None  # the record's `lean` field; None when the verdict is "missing"
+
+
+def lean_grader_version(benchmark: LeanBenchmark) -> dict:
+    return {
+        "lean_rules": LEAN_RULES_VERSION,
+        "judge_repository": benchmark.judge_repository,
+        "judge_commit": benchmark.judge_commit,
+        "allowed_axioms": list(benchmark.allowed_axioms),
+    }
+
+
+def check(
+    theorem: Theorem, reply: str, runner, limits: Limits, allowed: Sequence[str]
+) -> LeanGrade:
+    """Grade one reply in a fresh work directory: `proved` only on the judge's clean pass."""
+    code = extract_code(reply)
+    if code is None:
+        return LeanGrade("missing", None, None, None)
+    submission = assemble(theorem, code)
+
+    def failed(reason: str, compiled: Finished) -> LeanGrade:
+        return LeanGrade("failed", code, submission, _record(reason, compiled, code))
+
+    with runner.work_dir() as work:
+        reference = work / "Reference.olean"
+        compiled = _compile(runner, work / "Reference.lean", reference_source(theorem), limits)
+        if compiled.exit_code is None:
+            return failed("check_timed_out", compiled)
+        before = _digest(reference)
+        if compiled.exit_code != 0 or _has_error(compiled) or before is None:
+            return failed("judge_error", compiled)
+
+        compiled = _compile(runner, work / "Submission.lean", submission, limits)
+        if compiled.exit_code is None:
+            return failed("check_timed_out", compiled)
+        if compiled.exit_code != 0 or _has_error(compiled):
+            return failed("lean_error", compiled)
+        if _digest(reference) != before:
+            return failed("judge_error", compiled)
+
+        saved_path = work / "judge.json"
+        judged = runner.judge(
+            reference, work / "Submission.olean", saved_path, limits.judge_seconds
+        )
+        saved = _read_saved(saved_path)
+
+    reason, axioms = judgement(judged, saved, allowed, theorem.id)
+    record = _record(reason, compiled, code, judged, saved, axioms)
+    if reason is not None:
+        return LeanGrade("failed", code, submission, record)
+    return LeanGrade("proved", code, submission, record)
+
+
+def _compile(runner, source: Path, text: str, limits: Limits) -> Finished:
+    source.write_text(text, encoding="utf-8")
+    return runner.compile(source, source.with_suffix(".olean"), limits.compile_seconds)
+
+
+def _digest(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def _has_error(compiled: Finished) -> bool:
+    """Whether any stdout line is a JSON message of severity `error`; other lines are ignored."""
+    for line in compiled.stdout.splitlines():
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(message, dict) and message.get("severity") == "error":
+            return True
+    return False
+
+
+def _read_saved(path: Path) -> object:
+    """The judge's saved outcome, or None if it is absent, unreadable or not JSON."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _record(
+    reason: str | None,
+    compiled: Finished,
+    code: str,
+    judged: Finished | None = None,
+    saved: object = None,
+    axioms: Sequence[str] = (),
+) -> dict:
+    """The record's `lean` field: the last compile that ran, and the judge if it ran."""
+    judge = None
+    if judged is not None:
+        judge = {
+            "exit_code": judged.exit_code,
+            "outcome": saved,
+            "stderr": judged.stderr[:MESSAGE_CAP],
+        }
+    return {
+        "reason": reason,
+        "exit_code": compiled.exit_code,
+        "messages": (compiled.stdout + compiled.stderr)[:MESSAGE_CAP],
+        "judge": judge,
+        "axioms": list(axioms),
+        "flags": flags(code),
+        "compile_seconds": compiled.seconds,
+        "judge_seconds": None if judged is None else judged.seconds,
+    }
