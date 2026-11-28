@@ -125,3 +125,68 @@ def test_every_committed_configuration_loads():
     assert configs, "no committed configuration to check"
     for path in configs:
         load_config(path)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+LEAN = """
+[lean]
+instruction = "Complete the theorem."
+compile_time_limit_seconds = 300
+judge_time_limit_seconds = 60
+"""
+
+
+def test_a_configuration_without_a_lean_section_has_none():
+    assert load_config(ROOT / "configs" / "qwen3-14b.toml").lean is None
+
+
+def test_a_lean_section_is_loaded_with_its_three_settings(tmp_path):
+    lean = load_config(write(tmp_path, VALID + LEAN)).lean
+
+    assert lean.instruction == "Complete the theorem."
+    assert lean.compile_time_limit_seconds == 300
+    assert lean.judge_time_limit_seconds == 60
+
+
+def test_a_lean_section_must_state_every_setting(tmp_path):
+    without_instruction = LEAN.replace('instruction = "Complete the theorem."\n', "")
+
+    with pytest.raises(ConfigError, match=r"missing setting lean\.instruction"):
+        load_config(write(tmp_path, VALID + without_instruction))
+
+
+def test_refuses_an_unknown_lean_setting(tmp_path):
+    with pytest.raises(ConfigError, match=r"unknown setting lean\.retries"):
+        load_config(write(tmp_path, VALID + LEAN + "retries = 3\n"))
+
+
+def test_refuses_a_blank_lean_instruction(tmp_path):
+    blank = LEAN.replace('"Complete the theorem."', '"  "')
+
+    with pytest.raises(ConfigError, match=r"lean\.instruction"):
+        load_config(write(tmp_path, VALID + blank))
+
+
+@pytest.mark.parametrize("setting", ["compile_time_limit_seconds", "judge_time_limit_seconds"])
+@pytest.mark.parametrize("value", ["0", "-5"])
+def test_refuses_a_lean_time_limit_that_is_not_positive(tmp_path, setting, value):
+    text = LEAN.replace(
+        f"{setting} = {300 if 'compile' in setting else 60}", f"{setting} = {value}"
+    )
+
+    with pytest.raises(ConfigError, match=rf"lean\.{setting}"):
+        load_config(write(tmp_path, VALID + text))
+
+
+def test_the_lean_configuration_differs_from_the_baseline_only_in_its_lean_section():
+    lean = load_config(ROOT / "configs" / "qwen3-14b-lean.toml")
+    base = load_config(ROOT / "configs" / "qwen3-14b.toml")
+
+    assert (lean.model, lean.runtime, lean.generation, lean.probe) == (
+        base.model,
+        base.runtime,
+        base.generation,
+        base.probe,
+    )
+    assert (lean.lean.compile_time_limit_seconds, lean.lean.judge_time_limit_seconds) == (300, 300)

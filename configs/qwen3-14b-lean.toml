@@ -1,0 +1,49 @@
+# The configuration for Lean benchmarks: the Qwen3-14B checkpoint, runtime,
+# generation settings and probe of qwen3-14b.toml, unchanged, plus the [lean]
+# section. The instruction and the two check limits are provisional until the
+# development run.
+
+[model]
+# The Ollama tag, and the manifest digest that `ollama list` abbreviates.
+# pi refuses to run if the installed model has any other digest.
+name = "qwen3:14b"
+digest = "bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8"
+
+[runtime]
+host = "http://127.0.0.1:11434"
+
+[generation]
+# Reasoning mode on, with the sampling settings the Ollama model ships with.
+think = true
+temperature = 0.6
+top_p = 0.95
+top_k = 20
+seed = 1
+# The output limit is twice the first one tried: at 8,192 tokens, 2 of the 30
+# development problems were cut off, and both finished correctly with more.
+# The problem and the whole reply must fit in the context together. The time
+# limit is reached only below 14 tokens a second, slower than this Mac runs
+# even on battery.
+context_length = 24576
+max_output_tokens = 16384
+time_limit_seconds = 1200
+# Pinned, because Ollama otherwise picks both from free memory at each load:
+# under memory pressure it halves the batch and stops memory-mapping the
+# weights (its log says `reason=metal_partial`), and the batch size changes the
+# arithmetic. These are the values every run so far was launched with.
+num_batch = 1024
+use_mmap = true
+
+[probe]
+# An original problem in the style of the harder MATH problems. It is not
+# taken from any benchmark, so the probe never touches evaluation data.
+# The answer is 12.
+problem = "Find the sum of all real numbers $x$ that satisfy $|x^2 - 6x + 5| = 3$."
+
+[lean]
+# The instruction placed above the theorem in the prompt.
+instruction = "Complete the following Lean 4 theorem. It is checked with Lean 4 and Mathlib. Reply with the complete theorem, its statement unchanged and its proof in full, in a single Lean 4 code block. You may state and prove helper lemmas before it. Do not use `sorry`."
+# The time allowed to compile a reply with Lean.
+compile_time_limit_seconds = 300
+# The time allowed to check that the compiled theorem is the one asked for.
+judge_time_limit_seconds = 300
