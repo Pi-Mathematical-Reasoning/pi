@@ -99,7 +99,8 @@ theorem pi_case (a b : ℕ) (h : a ≤ b) : a + 0 ≤ b := by
 | `reformatted` | the valid proof with the statement broken over three lines and extra spaces | `proved` |
 | `native_decide` | target `theorem pi_case : (2 : ℕ) ^ 10 = 1024 := by sorry`; proof `by native_decide` | `kernel_rejected` |
 | `fake_success_exit` | `#eval IO.println "Finished."`, then `#exit`, then the valid proof | `statement_changed` |
-| `add_false` | `SafeVerifyTest/AddFalse/Bad.lean` from the judge checkout, with `import Mathlib` in place of its import; target `theorem falseThm : False := by sorry` | not `proved` |
+| `add_false` | `SafeVerifyTest/AddFalse/Bad.lean` from the judge checkout, with `import Mathlib` in place of its import; target `theorem falseThm : False := by sorry` | not `proved` (on Lean 4.27 it does not compile, so it never reaches the judge) |
+| `add_false_env` | adds `pi_false : False` with a bogus value through `Environment.addDeclCore` with `doCheck := false`, then `theorem falseThm : False := pi_false`; same target as `add_false`. It compiles, and `#print axioms` reports no axioms | `kernel_rejected` |
 | `replace_axiom` | `SafeVerifyTest/ReplaceAxiom/Bad.lean`, same change; its `Target.lean` with `import Mathlib` added | not `proved` |
 | `skip_kernel` (record only) | the valid proof under `set_option debug.skipKernelTC true in` (the judge replays it in the kernel either way) | record |
 | `renamed_binders` (record only) | `theorem pi_case (x y : ℕ) (hxy : x ≤ y) : x + 0 ≤ y := by simpa using hxy` | record |
@@ -482,11 +483,12 @@ def test_flags_compile_time_commands_and_not_words_that_contain_them():
 
 EXPECTED = {"valid": None, "sorry": "sorry", "helper_sorry": "sorry", "helper_axiom": "axioms",
             "unused_sorry": "sorry", "weakened": "statement_changed", "renamed": "statement_changed",
-            "reformatted": None, "native_decide": "kernel_rejected", "fake_success_exit": "statement_changed"}
+            "reformatted": None, "native_decide": "kernel_rejected", "fake_success_exit": "statement_changed",
+            "replace_axiom": "kernel_rejected", "add_false_env": "kernel_rejected"}
 @pytest.mark.parametrize("case, reason", EXPECTED.items())
 def test_reads_each_captured_judgement(case, reason):
     assert judgement(*captured(case), ALLOWED)[0] == reason
-@pytest.mark.parametrize("case", ["add_false", "replace_axiom"])
+@pytest.mark.parametrize("case", ["add_false_env", "replace_axiom"])
 def test_an_exploit_is_never_a_pass(case):
     assert judgement(*captured(case), ALLOWED)[0] is not None
 
@@ -568,7 +570,7 @@ def test_the_submission_is_what_assemble_built()
 
 - [ ] **Step 3: Implement `check`.** Inside `runner.work_dir()`: write and compile `Reference.lean`; hash `Reference.olean`; write and compile `Submission.lean`; fail on a non-zero exit or any stdout JSON line whose `severity` is `error`; hash the reference again and compare; run the judge; apply `judgement`. Cap `messages` and the judge's `stderr` at `MESSAGE_CAP`. Files are written as UTF-8.
 
-- [ ] **Step 4: Write `tests/test_lean_real.py`**, skipped unless `PI_LEAN_TESTS=1`. It uses a real `LeanRunner` on `data/` and `benchmarks/minif2f-test.toml` (for the pins only). For each case of Task 1 with an expected column it builds the theorem with `split_theorems(Target.lean)`, passes `Submission.lean` as a fenced reply, and asserts the verdict and reason. Three more with the default target: a proof-only reply `simpa using h` is `proved`; a reply repeating `import Mathlib` twice is `proved`; a proof that begins `sleep 120000` under `Limits(30, 30)` gives `check_timed_out`.
+- [ ] **Step 4: Write `tests/test_lean_real.py`**, skipped unless `PI_LEAN_TESTS=1`. It uses a real `LeanRunner` on `data/` and `benchmarks/minif2f-test.toml` (for the pins only). For each case of Task 1 with an expected column it builds the theorem with `split_theorems(Target.lean)`, passes `Submission.lean` as a fenced reply, and asserts the verdict and reason (`add_false` is `lean_error`: it does not compile on Lean 4.27). Three more with the default target: a proof-only reply `simpa using h` is `proved`; a reply repeating `import Mathlib` twice is `proved`; a proof that begins `sleep 120000` under `Limits(30, 30)` gives `check_timed_out`.
 
 - [ ] **Step 5: Add `pi lean-check --config C --benchmark B --id ID --reply FILE`**: grades one saved reply against one theorem and prints the verdict, reason and axioms.
 
