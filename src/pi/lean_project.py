@@ -7,6 +7,7 @@ so what was graded is what the definition names.
 """
 
 import contextlib
+import fcntl
 import hashlib
 import os
 import re
@@ -29,6 +30,11 @@ LISTS = ("shipped_proofs", "lean_options", "allowed_axioms")
 PROJECT_FILES = ("lean-toolchain", "lake-manifest.json", "lakefile.lean")
 JUDGE_BINARY = Path(".lake") / "build" / "bin" / "safe_verify"
 SETUP_HINT = "run `pi lean-setup` for this benchmark"
+# The file under `<data dir>/lean/work/` whose lock a check holds: one check at a time.
+LOCK = ".lock"
+# How long output is still read after a process is killed at its limit, for a descendant that
+# left the process group but holds the pipe.
+DRAIN_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -257,7 +263,7 @@ def run_process(command: list[str], cwd: Path, limit: float) -> Finished:
         exit_code = process.returncode
     except subprocess.TimeoutExpired:
         _kill_group(process)
-        stdout, stderr = process.communicate()
+        stdout, stderr = _drain(process)
         exit_code = None
     except BaseException:  # an interrupt must not leave Lean or the judge running
         _kill_group(process)
@@ -272,9 +278,45 @@ def run_process(command: list[str], cwd: Path, limit: float) -> Finished:
     )
 
 
+def _drain(process: subprocess.Popen) -> tuple[bytes, bytes]:
+    """The rest of a killed process's output, or what was read when DRAIN_SECONDS ran out."""
+    try:
+        return process.communicate(timeout=DRAIN_SECONDS)
+    except subprocess.TimeoutExpired as error:  # a descendant outside the group holds the pipe
+        for pipe in (process.stdout, process.stderr):
+            with contextlib.suppress(OSError):
+                pipe.close()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=DRAIN_SECONDS)
+        return error.output or b"", error.stderr or b""
+
+
 def _kill_group(process: subprocess.Popen) -> None:
-    with contextlib.suppress(ProcessLookupError):
+    # macOS can answer EPERM rather than ESRCH once only exited processes are left in the group.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(process.pid, signal.SIGKILL)
+
+
+@contextlib.contextmanager
+def _exclusive(lock: Path) -> Iterator[None]:
+    """Hold an exclusive lock on the file, or refuse at once if anything else holds it.
+
+    The kernel releases the lock when the file is closed or its process dies, so a crash
+    leaves nothing to clear. A second lock taken in the same process is refused too.
+    """
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise BenchmarkError(
+                f"another Lean check is running on this machine (it holds {lock}); "
+                "only one may run at a time, since one judge run needs about 25 GB: "
+                "wait for it to end, then run the same command again"
+            ) from None
+        yield
+    finally:
+        os.close(descriptor)  # releases the lock
 
 
 class LeanRunner:
@@ -297,15 +339,20 @@ class LeanRunner:
 
     @contextlib.contextmanager
     def work_dir(self) -> Iterator[Path]:
-        """A fresh directory under `<data dir>/lean/work/`, removed on exit."""
+        """A fresh directory under `<data dir>/lean/work/`, removed on exit.
+
+        It is made, used and removed under an exclusive lock on `<data dir>/lean/work/.lock`,
+        so only one check runs on the machine at a time: one judge run needs about 25 GB.
+        """
         parent = self.data_dir / "lean" / "work"
         parent.mkdir(parents=True, exist_ok=True)
-        path = parent / secrets.token_hex(8)
-        path.mkdir()
-        try:
-            yield path
-        finally:
-            shutil.rmtree(path, ignore_errors=True)
+        with _exclusive(parent / LOCK):
+            path = parent / secrets.token_hex(8)
+            path.mkdir()
+            try:
+                yield path
+            finally:
+                shutil.rmtree(path, ignore_errors=True)
 
     def compile(self, source: Path, olean: Path, limit: float) -> Finished:
         options = [part for option in self.benchmark.lean_options for part in ("-D", option)]

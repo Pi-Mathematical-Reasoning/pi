@@ -7,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 from pathlib import Path
@@ -15,6 +16,7 @@ import pytest
 
 from pi.benchmarks import Benchmark, BenchmarkError, load_benchmark
 from pi.lean_project import (
+    LOCK,
     Finished,
     LeanBenchmark,
     LeanRunner,
@@ -386,6 +388,72 @@ def test_a_child_left_behind_by_a_command_that_exits_is_killed(tmp_path):
                 os.kill(int((tmp_path / "pid").read_text()), signal.SIGKILL)
 
 
+def test_a_permission_error_from_killing_the_group_does_not_escape(tmp_path, monkeypatch):
+    # macOS sometimes answers EPERM, not ESRCH, for a group whose processes have all exited.
+    real = os.killpg
+
+    def killpg(pid, sig):
+        with contextlib.suppress(OSError):
+            real(pid, sig)
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr("pi.lean_project.os.killpg", killpg)
+    done = run_process(["sh", "-c", "echo hi"], tmp_path, limit=10)
+    assert (done.exit_code, done.stdout) == (0, "hi\n")
+    assert run_process(["sleep", "60"], tmp_path, limit=1).exit_code is None
+
+
+def _wait_for(path: Path, seconds: float = 10) -> int:
+    deadline = time.monotonic() + seconds
+    while not (path.exists() and path.read_text().strip()):
+        assert time.monotonic() < deadline, f"{path} was never written"
+        time.sleep(0.01)
+    return int(path.read_text())
+
+
+def test_a_descendant_that_escaped_the_group_cannot_hold_the_call_open(tmp_path, monkeypatch):
+    monkeypatch.setattr("pi.lean_project.DRAIN_SECONDS", 1)
+    escape = (
+        "import os, time; os.setsid(); open('pid', 'w').write(str(os.getpid())); time.sleep(60)"
+    )
+    script = tmp_path / "start.sh"
+    script.write_text(f'echo started\n{sys.executable} -c "{escape}" &\nsleep 60\n')
+    try:
+        done = run_process(["sh", str(script)], tmp_path, limit=1)
+        assert done.exit_code is None and done.seconds < 10
+        assert done.stdout == "started\n"
+    finally:  # the escaped process holds the pipe until it is killed
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(_wait_for(tmp_path / "pid"), signal.SIGKILL)
+
+
+@pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGHUP])
+def test_a_termination_signal_kills_what_the_check_started(tmp_path, number):
+    script = tmp_path / "start.sh"
+    script.write_text("sleep 60 &\necho $! > pid\nsleep 60\n")
+    code = textwrap.dedent(
+        f"""
+        from pathlib import Path
+        from pi.cli import termination_as_interrupt
+        from pi.lean_project import run_process
+        with termination_as_interrupt():
+            run_process(["sh", {str(script)!r}], Path({str(tmp_path)!r}), 60)
+        """
+    )
+    child = subprocess.Popen([sys.executable, "-c", code], cwd=REPO, stderr=subprocess.PIPE)
+    try:
+        grandchild = _wait_for(tmp_path / "pid")
+        child.send_signal(number)
+        _, stderr = child.communicate(timeout=10)
+        assert b"KeyboardInterrupt" in stderr
+        assert _dies_soon(grandchild)
+    finally:  # leave nothing behind if the assertions fail
+        child.kill()
+        if (tmp_path / "pid").exists():
+            with contextlib.suppress(ProcessLookupError, ValueError):
+                os.kill(int((tmp_path / "pid").read_text()), signal.SIGKILL)
+
+
 def test_output_is_read_as_utf8_whatever_the_locale(tmp_path, monkeypatch):
     monkeypatch.setenv("LC_ALL", "C")
     code = "import sys; sys.stdout.buffer.write('\u211d \u2211'.encode())"
@@ -465,3 +533,46 @@ def test_a_work_directory_is_removed_even_when_the_check_raises(tmp_path):
     assert not seen.exists()
     with runner.work_dir() as again:
         assert again != seen
+
+
+def test_a_second_check_is_refused_while_one_is_running_and_allowed_after(tmp_path):
+    runner, _, data = recording_runner(tmp_path)
+    other = LeanRunner(runner.benchmark, data)
+    with runner.work_dir():
+        for second in (runner, other):  # the same runner nested, or another in this process
+            refused = pytest.raises(BenchmarkError, match="another Lean check is running")
+            with refused, second.work_dir():
+                pass
+        assert len([p for p in (data / "lean" / "work").iterdir() if p.is_dir()]) == 1
+    with other.work_dir() as work:
+        assert work.is_dir()
+
+
+def test_the_lock_is_released_when_a_check_raises(tmp_path):
+    runner, _, _ = recording_runner(tmp_path)
+    with pytest.raises(RuntimeError), runner.work_dir():
+        raise RuntimeError("boom")
+    with runner.work_dir() as work:
+        assert work.is_dir()
+
+
+def test_a_lock_left_by_a_process_that_died_does_not_block(tmp_path):
+    runner, _, data = recording_runner(tmp_path)
+    with runner.work_dir():
+        pass
+    lock = data / "lean" / "work" / LOCK
+    hold = "import fcntl, os, sys, time; fd = os.open(sys.argv[1], os.O_RDWR); "
+    hold += "fcntl.flock(fd, fcntl.LOCK_EX); print('locked', flush=True); time.sleep(60)"
+    child = subprocess.Popen([sys.executable, "-c", hold, str(lock)], stdout=subprocess.PIPE)
+    try:
+        assert child.stdout.readline() == b"locked\n"
+        with pytest.raises(BenchmarkError, match="only one may run at a time"), runner.work_dir():
+            pass
+        child.kill()  # dies holding the lock, as a crashed pi would
+        child.wait(timeout=10)
+        assert lock.exists()
+        with runner.work_dir() as work:
+            assert work.is_dir()
+    finally:
+        child.kill()
+        child.wait(timeout=10)

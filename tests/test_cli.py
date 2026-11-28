@@ -3,10 +3,15 @@
 import hashlib
 import io
 import json
+import os
+import signal
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+import pytest
 
 from pi.cli import main
 from pi.lean_evaluation import lean_prompt
@@ -292,6 +297,27 @@ def test_eval_stopped_from_the_keyboard_says_how_to_resume(ollama, tmp_path, cap
 
     assert status == 130
     assert "run the same command again to resume" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGHUP])
+def test_eval_stopped_by_a_termination_signal_says_how_to_resume(
+    ollama, tmp_path, capsys, monkeypatch, number
+):
+    before = signal.getsignal(number)
+
+    def terminated(*arguments, **options):
+        # Sent only once pi handles it: the default action would end the test run.
+        assert signal.getsignal(number) not in (signal.SIG_DFL, before)
+        os.kill(os.getpid(), number)
+        time.sleep(5)
+
+    monkeypatch.setattr("pi.cli.run_evaluation", terminated)
+
+    status = main(eval_arguments(tmp_path, ollama))
+
+    assert status == 130
+    assert "interrupted; the run is incomplete" in capsys.readouterr().err
+    assert signal.getsignal(number) == before
 
 
 def test_eval_explains_a_missing_benchmark_definition(ollama, tmp_path, capsys):

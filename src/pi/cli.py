@@ -1,8 +1,12 @@
 """The `pi` command."""
 
 import argparse
+import contextlib
 import json
+import signal
 import sys
+import threading
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -37,6 +41,34 @@ PROJECT_FILE = Path(__file__).resolve().parents[2] / "jaws.yaml"
 
 
 def main(argv: list[str] | None = None) -> int:
+    with termination_as_interrupt():
+        return _main(argv)
+
+
+@contextlib.contextmanager
+def termination_as_interrupt() -> Iterator[None]:
+    """Stop on SIGTERM and SIGHUP as on Ctrl-C, so the paths that kill Lean's process group run.
+
+    Without this the signal ends Python at once, and a check's processes outlive it with no
+    limit, since the limit is kept by the process that died. The old handlers come back after.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield  # only the main thread may set signal handlers
+        return
+
+    def interrupt(number, frame):
+        raise KeyboardInterrupt
+
+    numbers = (signal.SIGTERM, signal.SIGHUP)
+    previous = {number: signal.signal(number, interrupt) for number in numbers}
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
+def _main(argv: list[str] | None) -> int:
     arguments = sys.argv[1:] if argv is None else list(argv)
     options = _parser().parse_args(arguments)
     if options.command == "probe":
