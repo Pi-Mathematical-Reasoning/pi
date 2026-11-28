@@ -15,10 +15,10 @@ from pathlib import Path
 import yaml
 
 from pi.audit import AUDIT, fingerprint
+from pi.lean_evaluation import PROOFS
 from pi.revision import code_revision
 
 MANIFEST = "_manifest.json"
-PROOFS = "proofs"
 
 
 class PublishError(Exception):

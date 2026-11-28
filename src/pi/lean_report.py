@@ -131,13 +131,20 @@ def _lean_cost(run: dict, results: list[dict]) -> list[str]:
     judges = [x["judge_seconds"] for x in records if x.get("judge_seconds") is not None]
     compile_limit = run["lean"]["compile_time_limit_seconds"]
     judge_limit = run["lean"]["judge_time_limit_seconds"]
+    # Only checks that finished: one killed at a limit is counted by its reason instead.
     near = sum(
         (x.get("compile_seconds") or 0) >= NEAR_LIMIT * compile_limit
         or (x.get("judge_seconds") or 0) >= NEAR_LIMIT * judge_limit
         for x in records
+        if x.get("reason") != "check_timed_out"
     )
+    # The answer report's rows; its peak memory is the model's alone, not Lean's or the judge's.
+    shared = [
+        ("Peak memory (model)", value) if label == "Peak memory" else (label, value)
+        for label, value in _cost(run, results)
+    ]
     rows = [
-        *_cost(run, results),
+        *shared,
         *_spread("Compile time per check", compiles),
         *_spread("Judge time per check", judges),
         ("Checks within 20% of a limit", near),

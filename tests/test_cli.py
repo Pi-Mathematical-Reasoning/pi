@@ -767,3 +767,56 @@ def test_audit_of_a_sound_lean_run_reports_each_recheck_and_each_check(
     ]
     audit = json.loads((out / "audit.json").read_text())
     assert audit["passed"] is True and "proofs/fixture_add_zero.lean" in audit["files"]
+
+
+def run_check_arguments(tmp_path, monkeypatch, ollama, runner):
+    definition, out = proved_lean_run(ollama, tmp_path, monkeypatch)
+    monkeypatch.setattr("pi.cli.LeanRunner", lambda benchmark, data_dir: runner)
+    arguments = ["lean-check", "--config", str(tmp_path / "lean-config.toml")]
+    arguments += ["--benchmark", str(definition), "--id", "fixture_add_zero"]
+    return arguments + ["--data-dir", str(tmp_path / "data")], out
+
+
+def test_lean_check_grades_the_reply_saved_in_a_run_and_never_its_reasoning(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    runner = FakeRunner(
+        compiles=[Finished(0, "", "", 1.0), Finished(0, "", "", 7.3)],
+        judges=[Finished(0, "", "SafeVerify check passed.\n", 26.0)],
+        saved=[lean_outcome(["propext"])],
+    )
+    arguments, out = run_check_arguments(tmp_path, monkeypatch, ollama, runner)
+    capsys.readouterr()
+
+    assert main([*arguments, "--run", str(out)]) == 0
+
+    assert capsys.readouterr().out.splitlines()[0] == "proved"
+    assert "  simp\n" in runner.sources["Submission.lean"]
+    assert "omega" not in runner.sources["Submission.lean"]
+
+
+def test_lean_check_explains_a_theorem_the_run_has_no_result_for(
+    ollama, tmp_path, monkeypatch, capsys
+):
+    arguments, out = run_check_arguments(tmp_path, monkeypatch, ollama, FakeRunner())
+    rows = (out / "results.jsonl").read_text().splitlines()
+    (out / "results.jsonl").write_text("\n".join(rows[1:]) + "\n")
+    capsys.readouterr()
+
+    assert main([*arguments, "--run", str(out)]) == 1
+
+    assert capsys.readouterr().err == (
+        f"error: {out / 'results.jsonl'} has no result for fixture_add_zero\n"
+    )
+
+
+def test_lean_check_takes_exactly_one_of_a_reply_and_a_run(tmp_path, monkeypatch, capsys):
+    arguments, _ = lean_check_setup(tmp_path, monkeypatch, FakeRunner())
+    reply = arguments.index("--reply")
+    neither = arguments[:reply] + arguments[reply + 2 :]
+
+    for wrong in (neither, [*arguments, "--run", str(tmp_path)]):
+        with pytest.raises(SystemExit) as stopped:
+            main(wrong)
+        assert stopped.value.code == 2
+    assert "--reply" in capsys.readouterr().err

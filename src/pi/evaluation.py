@@ -268,7 +268,10 @@ def _check_runner(run: dict, sampler: ResourceSampler, out: Path) -> None:
     first settings seen are recorded; a different launch stops the run before the
     attempt it made is kept. Only the port, which changes at every load, is ignored.
     """
-    sampler.sample()  # the model of the attempt just made is still loaded
+    # In an answer run the model of the attempt just made is still loaded. A Lean run unloads
+    # it before its check, so this sample finds no runner and the commands stay those the
+    # attempt's own sample saw, taken while the model was loaded.
+    sampler.sample()
     seen = [_PORT.sub("", without_home(c)) for c in sampler.runner_commands]
     if not seen:
         return

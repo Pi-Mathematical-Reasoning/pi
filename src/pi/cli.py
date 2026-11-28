@@ -14,7 +14,7 @@ from pi.audit import AUDIT, REPORT, audit_run
 from pi.benchmarks import BenchmarkError, fetch_file, load_benchmark, load_problems
 from pi.checkpoint import CheckpointError
 from pi.config import ConfigError, load_config
-from pi.evaluation import RUN, EvaluationError, run_evaluation
+from pi.evaluation import RESULTS, RUN, EvaluationError, read_results, run_evaluation
 from pi.grading import grade, grader_version
 from pi.lean_audit import audit_lean_run
 from pi.lean_evaluation import LeanTask
@@ -129,12 +129,22 @@ def _lean_check(options: argparse.Namespace) -> int:
         benchmark = _lean_benchmark(options.benchmark)
         lean_environment(benchmark, options.data_dir)
         theorem = _theorem(benchmark, options.data_dir, options.id)
-        reply = options.reply.read_text(encoding="utf-8")
+        if options.run is None:
+            reply = options.reply.read_text(encoding="utf-8")
+        else:
+            reply = _reply_in_run(options.run, options.id)
         settings = config.lean
         limits = Limits(settings.compile_time_limit_seconds, settings.judge_time_limit_seconds)
         runner = LeanRunner(benchmark, options.data_dir)
         result = check_proof(theorem, reply, runner, limits, benchmark.allowed_axioms)
-    except (OSError, UnicodeDecodeError, ConfigError, BenchmarkError) as error:
+    except (
+        OSError,
+        UnicodeDecodeError,
+        ConfigError,
+        BenchmarkError,
+        EvaluationError,
+        ValueError,
+    ) as error:
         return _fail(error)
 
     print(result.verdict)
@@ -313,6 +323,19 @@ def _report(options: argparse.Namespace) -> int:
     return 0
 
 
+def _reply_in_run(run: Path, id: str) -> str:
+    """The visible reply saved in a run for one theorem: never the reasoning."""
+    found = [r for r in read_results(run) if isinstance(r, dict) and r.get("id") == id]
+    if len(found) != 1:
+        many = "no result" if not found else f"{len(found)} results"
+        raise EvaluationError(f"{run / RESULTS} has {many} for {id}")
+    response = found[0].get("response") or {}
+    content = response.get("content", "") if isinstance(response, dict) else ""
+    if not isinstance(content, str):
+        raise ValueError(f"{run / RESULTS}: the reply saved for {id} is not text")
+    return content
+
+
 def _announce(line: str) -> None:
     print(line, flush=True)
 
@@ -413,8 +436,10 @@ def _parser() -> argparse.ArgumentParser:
         "--benchmark", required=True, type=Path, help="the Lean benchmark definition, in TOML"
     )
     lean_check.add_argument("--id", required=True, help="the theorem's name")
-    lean_check.add_argument(
-        "--reply", required=True, type=Path, help="a file holding the reply, with its code block"
+    reply = lean_check.add_mutually_exclusive_group(required=True)
+    reply.add_argument("--reply", type=Path, help="a file holding the reply, with its code block")
+    reply.add_argument(
+        "--run", type=Path, help="a run directory whose saved reply to the theorem to check"
     )
     lean_check.add_argument(
         "--data-dir",

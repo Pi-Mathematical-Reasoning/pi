@@ -137,6 +137,21 @@ def test_counts_checks_that_came_within_a_fifth_of_a_limit(tmp_path):
     assert "| Checks within 20% of a limit | 1 |" in save(tmp_path)
 
 
+def test_a_check_killed_at_a_limit_is_not_counted_as_within_a_fifth_of_it(tmp_path):
+    timed_out = result(
+        "fixture_slow", "failed", "algebra", lean_record("check_timed_out", 300.1, None)
+    )
+
+    assert "| Checks within 20% of a limit | 1 |" in save(tmp_path, results=[*RESULTS, timed_out])
+
+
+def test_the_peak_memory_row_says_it_is_the_model_s(tmp_path):
+    report = save(tmp_path)
+
+    assert "| Peak memory (model) |" in report
+    assert "| Peak memory |" not in report
+
+
 def test_breaks_the_score_down_by_family(tmp_path):
     report = save(tmp_path)
 
