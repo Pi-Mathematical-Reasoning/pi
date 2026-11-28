@@ -7,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -339,6 +340,22 @@ def test_a_process_past_its_limit_is_killed_with_everything_it_started(tmp_path)
         assert done.exit_code is None and 1 <= done.seconds < 5
         assert not _alive(pid)
     finally:  # leave no stray sleep behind if the assertions fail
+        if (tmp_path / "pid").exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int((tmp_path / "pid").read_text()), signal.SIGKILL)
+
+
+def test_an_interrupted_wait_kills_the_process_group_and_propagates(tmp_path):
+    script = tmp_path / "start.sh"
+    script.write_text("sleep 60 &\necho $! > pid\nsleep 60\n")
+    timer = threading.Timer(1, os.kill, [os.getpid(), signal.SIGINT])
+    timer.start()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            run_process(["sh", str(script)], tmp_path, limit=30)
+        assert not _alive(int((tmp_path / "pid").read_text()))
+    finally:  # leave no stray sleep behind if the assertions fail
+        timer.cancel()
         if (tmp_path / "pid").exists():
             with contextlib.suppress(ProcessLookupError):
                 os.kill(int((tmp_path / "pid").read_text()), signal.SIGKILL)

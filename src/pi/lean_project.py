@@ -256,6 +256,11 @@ def run_process(command: list[str], cwd: Path, limit: float) -> Finished:
             os.killpg(process.pid, signal.SIGKILL)
         stdout, stderr = process.communicate()
         exit_code = None
+    except BaseException:  # an interrupt must not leave Lean or the judge running
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        raise
     return Finished(
         exit_code=exit_code,
         stdout=stdout.decode("utf-8", errors="replace"),
