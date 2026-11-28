@@ -1,0 +1,18 @@
+# Reproduction check for the scored MATH-500 run (experiments/README.md,
+# "2026-11-21: MATH-500 baseline, pre-registered", step 2 after the run).
+# The five problems chosen in advance with seed 20261121. Same file, checksum and
+# name as benchmarks/math-500.toml, so the cached, verified problem file is reused.
+# Kept scored so pi enforces the same standard: committed code, mains, verified weights.
+name = "math-500"
+url = "https://huggingface.co/datasets/HuggingFaceH4/MATH-500/resolve/6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be/test.jsonl"
+sha256 = "35dc41080a3680858b27fa7e0533d2d547825316fc5dafe5d316f4ccc5a06132"
+format = "jsonl"
+scored = true
+mirror = "s3://jaws-pi-benchmarks-problems/data/math-500/35dc41080a3680858b27fa7e0533d2d547825316fc5dafe5d316f4ccc5a06132/test.jsonl"
+ids = [
+  "test/algebra/305.json",
+  "test/counting_and_probability/25149.json",
+  "test/geometry/456.json",
+  "test/intermediate_algebra/232.json",
+  "test/precalculus/675.json",
+]

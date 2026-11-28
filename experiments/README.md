@@ -239,7 +239,9 @@ there was no swap. Kept from the run, in
 
 ## 2026-11-21: MATH-500 baseline, pre-registered
 
-**Status: registered, not yet run.** This entry fixes everything about the
+**Status: run, audited, reproduced and published.** The result is the next
+entry, [477 of 500 correct](#2026-11-26-math-500-baseline-477-of-500-correct).
+This entry fixes everything about the
 scored run before it starts. The pull request that adds it is merged before the
 first attempt, so the git history shows the rules came before the results.
 Nothing below changes once the run starts. If something must change, the run is
@@ -335,3 +337,122 @@ compute.
 an inferred 30 of 30 under these limits. Those problems come from MATH's
 training split, which the checkpoint may have seen in pretraining. A MATH-500
 score well below that would be an honest baseline, not a sign of a fault.
+
+
+## 2026-11-26: MATH-500 baseline, 477 of 500 correct
+
+**Question.** What fraction of the 500 MATH-500 problems does the original
+Qwen3-14B checkpoint answer correctly, with one attempt each, on this Mac?
+
+**Answer.** 477 of 500, **95.4%**, under the rules fixed in the
+[pre-registered entry](#2026-11-21-math-500-baseline-pre-registered) above,
+with nothing changed during the run. Running out of output tokens cost far
+more problems than wrong answers did: 17 replies were cut off at the
+16,384-token limit and 6 gave a wrong answer. The run passed `pi audit`, five
+problems chosen in advance reproduced token for token from fresh loads, and
+the records are published.
+
+**Setup.** As pre-registered: all 500 problems of `benchmarks/math-500.toml`,
+`configs/qwen3-14b.toml`, grader rules version 1 with math-verify 0.9.0, one
+attempt per problem from a fresh load. Both sessions ran from a clean checkout
+of `20323d0`, on mains power, with the weights file verified:
+
+```sh
+caffeinate -i uv run pi eval --config configs/qwen3-14b.toml \
+  --benchmark benchmarks/math-500.toml --out runs/2026-11-21-math-500
+```
+
+| Session | Started (UTC) | Ended (UTC) | Problems |
+| --- | --- | --- | --- |
+| 0 | 2026-11-25 06:59 | 2026-11-25 13:58 | 164 |
+| 1 | 2026-11-25 16:19 | 2026-11-26 06:00 | 336 |
+
+The second session resumed with the same command and directory.
+
+**Result.**
+
+| Measurement | Value |
+| --- | --- |
+| Correct | 477 of 500 (95.4%) |
+| `cut_off` | 17, all at the 16,384-token output limit |
+| `incorrect` | 6 |
+| `missing`, `timed_out` | 0 |
+| Model time | 20.6 h |
+| Time per problem | mean 148.5 s, median 100.0 s, longest 546.0 s |
+| Output tokens per problem | mean 4,719, median 3,313 |
+| Speed | mean 33.2 tokens per second |
+| Peak memory | 10.9 GiB |
+| Swap growth | None |
+| Discarded attempts | None |
+
+| Level | Correct | | Subject | Correct |
+| --- | --- | --- | --- | --- |
+| 1 | 43 of 43 | | Algebra | 123 of 124 |
+| 2 | 90 of 90 | | Counting & Probability | 35 of 38 |
+| 3 | 103 of 105 | | Geometry | 36 of 41 |
+| 4 | 124 of 128 | | Intermediate Algebra | 89 of 97 |
+| 5 | 117 of 134 | | Number Theory | 62 of 62 |
+| | | | Prealgebra | 79 of 82 |
+| | | | Precalculus | 53 of 56 |
+
+Kept from the run, in [2026-11-21-math-500](2026-11-21-math-500/):
+`run.json`, `results.jsonl` with every reply, [report.md](2026-11-21-math-500/report.md),
+which `pi report` rebuilds from the other two, and `audit.json`. They are the
+files published to `jaws-pi-prover-artifacts` under
+`data/runs/2026-11-21-math-500/` on 2026-11-27, byte for byte: their SHA-256
+values match the published `_manifest.json`. As with the development run, the
+records hold problem ids and the model's replies, not the dataset's problem
+texts or solutions.
+
+**Audit.** `pi audit` passed every check on 2026-11-26: the run is complete,
+the problem file matches its checksum, each problem has exactly one result,
+every saved reply grades to its recorded verdict, every result belongs to a
+recorded session, the scored standard held throughout, and the report
+rebuilds from the records. The problem file's source is recorded as
+"unknown: fetched before sources were recorded": it was fetched before `pi`
+began writing down whether a file came from the mirror or the upstream URL.
+The checksum is what makes the two interchangeable, and it matched.
+
+**Reproduction.** The five problems chosen in advance with seed 20261121 were
+run again from fresh loads on 2026-11-27, from the same clean checkout, on
+mains, through `pi eval` with a benchmark definition that lists only those
+five ids. Every reply matched the recorded one exactly, thinking and final
+text, with the same answer, verdict and token count:
+
+| Problem | Level | Output tokens | Reply |
+| --- | --- | --- | --- |
+| `test/algebra/305.json` | 5 | 1,982 | identical |
+| `test/counting_and_probability/25149.json` | 4 | 3,696 | identical |
+| `test/geometry/456.json` | 2 | 1,871 | identical |
+| `test/intermediate_algebra/232.json` | 5 | 10,097 | identical |
+| `test/precalculus/675.json` | 5 | 5,209 | identical |
+
+The reproduction run also passed `pi audit`. A first attempt on 2026-11-26
+stopped before its first problem because the Mac was on battery; that session
+attempted nothing and stays on record in its `run.json`. The launch command
+matched the scored run's except for the local port. Kept in
+[2026-11-21-math-500/reproduction](2026-11-21-math-500/reproduction/): the
+benchmark definition, `compare-reproduce.py` and its output
+`comparison.json`, and the run's `run.json`, `results.jsonl`, `report.md` and
+`audit.json`.
+
+**What it means.**
+
+- **The output limit, not reasoning errors, sets most of the gap.** 15 of the
+  17 cut-off replies were still thinking at 16,384 tokens and had written no
+  final text; the other 2 had started it but not reached a boxed answer. 15
+  were level 5, and 8 were Intermediate Algebra. Eight correct replies used
+  14,000 tokens or more, the longest 16,014. The time limit never bound: no
+  attempt took more than 546 s of its 1,200 s.
+- **Six answers were wrong**, at levels 3 to 5: `counting_and_probability/134`,
+  `prealgebra/1646`, `algebra/661`, `prealgebra/874`, `precalculus/768` and
+  `geometry/465`. Every finished reply ended in a boxed answer, so the strict
+  extraction rule again cost nothing.
+- **The estimate held.** The pre-registration expected 17 to 20 hours and about
+  11.5 GiB; the run took 20.6 hours of model time and peaked at 10.9 GiB.
+- **The score sits close to the ceiling.** It is above the 28 of 30 on the
+  development problems. Levels 1 and 2 were solved without a miss, and nearly
+  all the remaining headroom is at level 5. MATH-500 leaves little room to show
+  an improvement from fine-tuning, and the checkpoint may have seen MATH in
+  pretraining, so a later comparison needs a harder or fresher benchmark
+  alongside it.
