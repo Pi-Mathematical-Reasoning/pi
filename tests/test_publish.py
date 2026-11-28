@@ -187,3 +187,48 @@ def test_an_answer_run_publishes_the_same_four_files_as_before(aws, audited):
     assert [k for k in keys if k != "_manifest.json"][:4] == FILES
     manifest = json.loads(stored(aws, audited, "_manifest.json").read_text())
     assert list(manifest["files"]) == FILES
+
+
+def _audit_naming(out, names):
+    audit = json.loads((out / AUDIT).read_text())
+    for name in names:
+        audit["files"][name] = fingerprint(out / name)
+    (out / AUDIT).write_text(json.dumps(audit))
+
+
+def test_refuses_a_proof_file_that_is_a_symlink_to_a_file_outside(aws, audited, tmp_path):
+    outside = tmp_path / "outside.lean"
+    outside.write_text("theorem secret : True := trivial\n")
+    (audited / "proofs").mkdir()
+    (audited / PROOF).symlink_to(outside)
+    _audit_naming(audited, [PROOF])
+
+    with pytest.raises(PublishError, match="fixture_add_zero.lean.*(symbolic link|outside)"):
+        publish_run(audited, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()
+
+
+def test_refuses_a_proofs_directory_that_is_a_symlink(aws, audited, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "fixture_add_zero.lean").write_text("theorem secret : True := trivial\n")
+    (audited / "proofs").symlink_to(elsewhere, target_is_directory=True)
+    _audit_naming(audited, [PROOF])
+
+    with pytest.raises(PublishError, match="proofs.*(symbolic link|outside)"):
+        publish_run(audited, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()
+
+
+def test_refuses_a_standard_file_that_is_a_symlink_to_an_identical_copy(aws, audited, tmp_path):
+    copy = tmp_path / "results-copy.jsonl"
+    copy.write_bytes((audited / "results.jsonl").read_bytes())
+    (audited / "results.jsonl").unlink()
+    (audited / "results.jsonl").symlink_to(copy)
+
+    with pytest.raises(PublishError, match="results.jsonl.*(symbolic link|outside)"):
+        publish_run(audited, BUCKET, AwsCli())
+
+    assert not (aws / BUCKET).exists()

@@ -46,6 +46,8 @@ def publish_run(out: Path, bucket: str, s3, prefix: str = "data/runs/") -> dict:
         if not path.is_file() or fingerprint(path) != recorded:
             raise PublishError(f"{name} has changed since it was audited; run `pi audit` again")
     folder = out / PROOFS
+    if folder.is_symlink():
+        raise PublishError(f"{PROOFS} is a symbolic link; nothing was published")
     if folder.is_dir():
         for path in sorted(folder.iterdir()):
             if f"{PROOFS}/{path.name}" not in audit["files"]:
@@ -70,6 +72,13 @@ def _inside(out: Path, name: str) -> None:
     """Refuse a name from the audit that points outside the run's directory."""
     if Path(name).is_absolute() or ".." in Path(name).parts:
         raise PublishError(f"{name!r} in the audit points outside {out}; nothing was published")
+    here = out
+    for part in Path(name).parts:
+        here = here / part
+        if here.is_symlink():
+            raise PublishError(f"{name} is a symbolic link (via {part}); nothing was published")
+    if not (out / name).resolve().is_relative_to(out.resolve()):
+        raise PublishError(f"{name} lies outside {out}; nothing was published")
 
 
 def _passed_audit(out: Path) -> dict:
